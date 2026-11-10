@@ -30,6 +30,9 @@ window.BANNERS_ART = {
     "town": "art/terrain/town.webp"
   },
   "events": {
+    "papal": "art/events/papal.webp",
+    "marriage": "art/events/marriage.webp",
+    "quest": "art/events/quest.webp",
     "plague": "art/events/plague.webp",
     "harvest": "art/events/harvest.webp",
     "bumperHarvest": "art/events/harvest.webp",

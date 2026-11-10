@@ -24,11 +24,12 @@
 <main class="layout">
   <section class="mapwrap" id="mapwrap">
     <div class="maphead" id="maphead"></div>
+    <div id="coach" class="coach" hidden></div>
+    <div id="cardlayer" class="cardlayer" aria-live="polite"></div>
     <div class="mapstage" id="mapstage">
       <svg id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Map of the realm"></svg>
       <svg id="anim" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
       <div class="zoombtns"><button class="btn tiny" id="zoomIn" aria-label="Zoom in">＋</button><button class="btn tiny" id="zoomOut" aria-label="Zoom out">－</button><button class="btn tiny" id="zoomReset" aria-label="Reset zoom">⌂</button><span class="muted" id="zoomlvl">100%</span></div>
-      <div id="cardlayer" class="cardlayer" aria-live="polite"></div>
     </div>
     <div class="legend">
       <span>Shield = army power · tap a county to act · drag/pinch to pan &amp; zoom</span>
@@ -40,11 +41,13 @@
     <section class="panel" id="ordersPanel"></section>
     <section class="panel" id="logPanel">
       <div class="panelhead"><h2>Chronicle</h2><button class="btn tiny" id="btnSkip" hidden>Skip ⏩</button></div>
+      <div class="logfilter" id="logFilter"><button class="btn tiny on" data-lf="all">All</button><button class="btn tiny" data-lf="battle">⚔ Battles</button><button class="btn tiny" data-lf="dip">🤝 Diplomacy</button><button class="btn tiny" data-lf="econ">💰 Economy</button></div>
       <div id="log" class="log" aria-live="polite"></div>
     </section>
   </aside>
 </main>
 <div class="sealbar" id="sealbar"></div>
+<aside id="dipdrawer" class="dipdrawer" hidden aria-label="Diplomacy"><div class="drawerhead"><b>🤝 Diplomacy</b><span class="muted small">the map stays visible</span><button class="btn tiny" id="closeDipX" aria-label="Close diplomacy">✕</button></div><div id="dipbox" class="dipbox"></div></aside>
 </div>
 
 <div class="pass" id="pass" hidden></div>

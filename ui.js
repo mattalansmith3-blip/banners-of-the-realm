@@ -5,7 +5,7 @@ const B = window.BOTR, NET = window.BOTRNET;
 const { UNITS, STANCES, STANCE_INFO, TAX, TERRAIN, SEASONS, CASTLE, TRAITS, PERSONALITIES, DIFFICULTY, PLAYER_DEF } = B;
 const SEASON_ICON = ['🌱', '☀️', '🍂', '❄️'];
 const $ = s => document.querySelector(s);
-const SAVE_KEY = 'botr_save_v3', ASYNC_KEY = 'botr_async_v3', MUTE_KEY = 'botr_mute';
+const SAVE_KEY = 'botr_save_v4', ASYNC_KEY = 'botr_async_v4', MUTE_KEY = 'botr_mute';
 const ART = window.BANNERS_ART || {};
 
 /* ------------------------------------------------------------ game / ui state */
@@ -16,7 +16,10 @@ let V = null;            // seat currently looking at the map while planning (nu
 let sel = null, selUnits = new Set(), selFor = null, marchStance = 'charge', marchStorm = false;
 let gen = null, answer, fast = false, timer = null, resolving = null;
 let flashC = null, uiMsg = '', movingIds = null, tokenSigs = {}, planRev = 0;
-let pickMode = null;     // {type:'scout'|'feint'} waiting for a map tap
+let pickMode = null;     // {type:'scout'|'feint'|'spy'} waiting for a map tap
+let coachTapped = false, logFilter = 'all', preview = null, coachSkip = false, dipFirstSeen = false;
+const STYLE_INFO = { builder: { icon: '🏰', name: 'Builder', perk: 'Master Masons: defenders +10%, castles −25%, +8% taxes, siege engines −40%. Holds grudges after betrayal.' }, warlord: { icon: '⚔️', name: 'Warlord', perk: 'Plunder: gold from every battle won, knights from any castle county and 15% cheaper.' }, schemer: { icon: '🎭', name: 'Schemer', perk: 'Spymaster: scouts −50%, feints 3g, spies 6g, softer betrayal penalty, easier pacts.' } };
+const LEVEL_INFO = { easy: 'Rivals plan only 3 orders, make mistakes and never storm castles. Good for learning.', normal: 'Rivals plan 5 orders, scout, use stances sensibly and storm weak castles.', hard: 'Sharp rivals: no mistakes, bolder attacks, they storm, sally and form leagues against you.' };
 
 /* ------------------------------------------------------------ helpers */
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,7 +45,7 @@ function unitArt(u) { if (u.rebel || u.raider) return artPath('units', 'rebels')
 function heroArt(h) { const a = ART.heroes; return a && a.length && h ? a[Math.abs(h.id) % a.length] : null; }
 function terrainArt(i) { const d = MAP_DEF[i]; if (d.capital !== undefined || d.role === 'cap') return artPath('terrain', 'town'); return artPath('terrain', d.terrain === 'plains' ? 'farmland' : d.terrain); }
 function castleArt(l) { return l > 0 ? artPath('castles', ['', 'palisade', 'keep', 'fortress'][l]) : null; }
-const EVENT_ART = { plague: 'plague', bumper_harvest: 'harvest', drought: 'fire', festival: 'festival', tournament: 'festival', bandits: 'bandits', mercenaries: 'mercenary', harsh_winter: 'winter', rebellion: 'rebellion' };
+const EVENT_ART = { plague: 'plague', bumper_harvest: 'harvest', drought: 'fire', festival: 'festival', tournament: 'festival', bandits: 'bandits', mercenaries: 'mercenary', harsh_winter: 'winter', rebellion: 'rebellion', crisis_truce: 'papal', crisis_interdict: 'papal', crisis_succession: 'papal', crisis_marriage: 'marriage', hero_quest: 'quest' };
 function eventArt(key) { if (EVENT_ART[key]) return artPath('events', EVENT_ART[key]); return null; }
 function lordArt(p) { return p && p.ai ? artPath('lords', p.ai.personality) : null; }
 function crestArt(seat) { return artPath('crests', ['aldric', 'valmoor', 'green', null, 'gold', null][seat]); }
@@ -170,6 +173,7 @@ function renderMap() {
       if (c.owner >= 0) g += `<path d="M${cx + 12} ${cy - 56 - c.castle * 3} v-13 l15 4.5 l-15 4.5" fill="${S.players[c.owner].color}" stroke="#222" stroke-width="1" pointer-events="none"/>`;
       if (c.build) g += `<text x="${cx + 26}" y="${cy - 28}" font-size="16" style="pointer-events:none">🔨</text>`;
     }
+    if (V != null && c.owner >= 0 && c.owner !== V) { const rl = B.relation(S, V, c.owner); if (rl !== 'neutral') g += `<text x="${cx + 30}" y="${cy - 14}" font-size="17" class="pacticon ${rl}" style="pointer-events:none"><title>${esc(B.REL_NAMES[rl] + ' with ' + pl(c.owner).short)}</title>${REL_ICON[rl]}</text>`; }
     if (c.siege || c.occ) g += `<circle class="siege" cx="${cx}" cy="${cy - 26}" r="${28 + c.castle * 2}"/>`;
     g += `<text class="cname" x="${cx}" y="${cy - (c.castle > 0 ? 3 : 14)}">${esc(d.name)}</text>`;
     if (c.owner >= 0) {
@@ -213,6 +217,8 @@ function renderMap() {
       parts.push(`<text x="${(x1 + x2) / 2}" y="${(y1 + y2) / 2 + 6}" font-size="20" text-anchor="middle" style="pointer-events:none">${STANCE_INFO[o.stance].icon}${o.storm ? '💥' : ''}</text>`);
     } else if (o.type === 'scout') {
       const t = MAP.centroid[o.target]; parts.push(`<text x="${t[0]}" y="${t[1] - 22}" font-size="26" text-anchor="middle" style="pointer-events:none">🔭</text>`);
+    } else if (o.type === 'spy') {
+      const t = MAP.centroid[o.target]; parts.push(`<text x="${t[0]}" y="${t[1] - 22}" font-size="26" text-anchor="middle" style="pointer-events:none">🕵️</text>`);
     } else if (o.type === 'feint') {
       const t = MAP.centroid[o.to]; parts.push(`<text x="${t[0] + 30}" y="${t[1] - 6}" font-size="22" style="pointer-events:none">🎭</text>`);
     } else if (o.county != null) {
@@ -220,7 +226,11 @@ function renderMap() {
       parts.push(`<text x="${cen[0] + 34}" y="${cen[1] - 4}" font-size="18" style="pointer-events:none">${{ recruit: '➕', merge: '⚜️', tax: '💰', build: '🔨', storm: '💥', sally: '⚔️' }[o.type] || '•'}</text>`);
     }
   }
-  if (flashC && flashC.bad) { const cen = MAP.centroid[flashC.id]; parts.push(`<text x="${cen[0]}" y="${cen[1] + 4}" font-size="46" text-anchor="middle" class="pulse" style="pointer-events:none">⚔️</text>`); }
+  if (preview && phase === 'plan') {
+    const a = MAP.centroid[preview.from], b = MAP.centroid[preview.to], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+    parts.push(`<path class="arrow preview" d="M${a[0] + dx / L * 28} ${a[1] + dy / L * 28} L${b[0] - dx / L * 40} ${b[1] - dy / L * 40}" marker-end="url(#ah)"/>`);
+  }
+  if (flashC && flashC.bad && flashC.id != null) { const cen = MAP.centroid[flashC.id]; parts.push(`<text x="${cen[0]}" y="${cen[1] + 4}" font-size="46" text-anchor="middle" class="pulse" style="pointer-events:none">⚔️</text>`); }
   for (const k of Object.keys(tokenSigs)) { const [ci, o] = k.split('_').map(Number); if (!seen.some(u => u.county === ci && u.owner === o)) delete tokenSigs[k]; }
   $('#map').innerHTML = parts.join('');
 }
@@ -228,6 +238,7 @@ function pickTargetOK(i) {
   if (!pickMode || V == null) return false;
   if (pickMode.type === 'scout') return !B.checkNewOrder(S, V, { type: 'scout', from: pickMode.from, target: i }, G.orders[V]);
   if (pickMode.type === 'feint') return !B.checkNewOrder(S, V, { type: 'feint', to: i }, G.orders[V]);
+  if (pickMode.type === 'spy') return !B.checkNewOrder(S, V, { type: 'spy', target: i }, G.orders[V]);
   return false;
 }
 
@@ -253,6 +264,7 @@ function renderHeader() {
   const badge = $('#seasonBadge');
   badge.textContent = `${SEASON_ICON[S.season]} ${SEASONS[S.season]} · Year ${S.year}`;
   badge.className = 'season' + (S.season === 3 ? ' winter' : '');
+  document.body.classList.toggle('revealing', phase === 'reveal');
   const nIn = B.incoming(S, me.id).length;
   $('#btnDip').hidden = phase === 'menu' || phase === 'pass';
   $('#btnDip').innerHTML = '🤝 Diplomacy' + (nIn ? ` <b class="badge">${nIn}</b>` : '');
@@ -262,6 +274,17 @@ function renderHeader() {
   h += chip(`🌾 <b>${Math.round(me.grain)}</b> <span class="sub">${netF >= 0 ? '+' : ''}${netF} this season${harv ? ' (harvest!)' : ''} (−${need} food)</span>`, me.grain + netF < 0 ? 'bad' : '');
   h += chip(`🏰 <b>${B.countiesOf(S, me.id).length}</b>/${MAP.n}`);
   h += chip(`⚔️ <b>${myUnits.length}</b> units · power <b>${Math.round(B.sumStr(myUnits))}</b>`);
+  const fc = B.forecast(S, me.id), lead = B.leaderOf(S), st0 = STYLE_INFO[me.style];
+  if (st0) h += chip(`${st0.icon} <b>${st0.name}</b>`, 'style" title="' + esc(st0.perk));
+  h += chip(`🕊️ <b>${me.infl}</b> <span class="sub">influence (+1/season; each offer costs 1)</span>`, me.infl < 1 ? 'bad' : '');
+  if (me.loan) h += chip(`🏦 loan: −${me.loan.pay}g × ${me.loan.left}`);
+  if (B.overheadFor(S, me.id) > 0) h += chip(`⚖️ Empire strain: −${B.overheadFor(S, me.id)}g taxes, −${B.strainMood(S, me.id)} mood`, 'warn');
+  if (S.claim && S.claim.holder >= 0) { const ci = B.claimInfo(S); h += chip(`👑 ${esc(S.players[S.claim.holder].short)} claims the crown ${S.claim.n}/${ci.hold}`, S.claim.holder === me.id ? 'good' : 'bad'); }
+  if (lead != null && lead !== me.id && phase === 'plan') h += `<span class="chip leaderchip" data-dipopen title="Propose an alliance 'against' the leader in Diplomacy">👑 ${esc(S.players[lead].short)} leads: form a League against them</span>`;
+  if (phase === 'plan' && fc.famine) h += chip(`⚠️ <b>FAMINE</b>: the granary runs dry this season (${fc.grainNext} grain). Troops desert, peasants die: buy grain, cut recruits, tax less.`, 'bad');
+  else if (phase === 'plan' && fc.dryIn != null) h += chip(`⚠️ Grain runs out in ~${fc.dryIn} season${fc.dryIn > 1 ? 's' : ''} (winter eats double). Plan ahead.`, 'warn');
+  if (phase === 'plan' && fc.bankrupt) h += chip(`⚠️ <b>BANKRUPT</b> next season: ${fc.goldNext}g after wages. Unpaid soldiers desert. Raise taxes or disband.`, 'bad');
+  if (phase === 'plan' && S.turn <= 3 && !S.dip.pacts.length && !B.outgoing(S, me.id).length && !ordersOf(me.id).some(o => o.type === 'dip')) h += `<span class="chip tipchip" data-dipopen>💡 Tip: open 🤝 Diplomacy and offer a <b>Non-aggression pact</b> before anyone attacks you</span>`;
   const nOrd = milCount(me.id), nDip = dipCount(me.id);
   h += chip(`📜 <b>${nOrd}</b>/${B.MAX_ORDERS} orders${nDip ? ` · ✉ <b>${nDip}</b> envoy${nDip > 1 ? 's' : ''}` : ''}`);
   const nInc = B.incoming(S, me.id).filter(p => !ordersOf(me.id).some(o => o.type === 'dip' && o.act === 'respond' && o.pid === p.id)).length;
@@ -280,7 +303,7 @@ function renderHeader() {
   $('#resbar').innerHTML = h;
   const foes = S.players.filter(p => p.id !== me.id && p.alive);
   $('#maphead').innerHTML = phase === 'reveal' ? '<b>The orders are revealed…</b> armies march, clash, and the Chronicle records it. <span class="muted">(Fog: you only see what your lands and scouts can see.)</span>' :
-    pickMode ? `<b>${pickMode.type === 'scout' ? '🔭 Tap a county up to 3 away to scout it' : '🎭 Tap an enemy-facing county to feint toward it'}</b> <button class="btn tiny" data-cancelpick>Cancel</button>` :
+    pickMode ? `<b>${pickMode.type === 'scout' ? '🔭 Tap a county up to 3 away to scout it' : pickMode.type === 'spy' ? '🕵️ Tap a county up to 3 away to spy on it' : '🎭 Tap an enemy-facing county to feint toward it'}</b> <button class="btn tiny" data-cancelpick>Cancel</button>` :
     `Goal: seize ${foes.length === 1 ? `<b>${esc(cn(foes[0].capital))}</b>` : 'rival capitals'} with infantry and hold one full season. Protect <b>${esc(cn(me.capital))}</b>.`;
 }
 
@@ -380,7 +403,8 @@ function renderCounty() {
       const selArr = free.filter(u => selUnits.has(u.id)), selPower = B.sumStr(selArr);
       h += `<div class="muted">Selected: <b>${selUnits.size}</b> unit(s), power <b>${f1(selPower)}</b>. Secret stance:</div><div class="seg" style="margin:4px 0">`;
       for (const s of STANCES) h += `<button class="btn ${marchStance === s ? 'on' : ''}" data-stance="${s}">${STANCE_INFO[s].icon} ${STANCE_INFO[s].name}</button>`;
-      h += `</div><div class="muted">⚔️ Charge beats Flank · 🛡️ Hold beats Charge · 🏹 Flank beats Hold (+40%)</div>`;
+      h += `</div><div class="muted">⚔️ Charge beats Flank · 🛡️ Hold beats Charge · 🏹 Flank beats Hold (+40%)</div>
+      <details class="stancehelp"><summary>Which stance should I pick?</summary><ul><li>Rival's last army <b>charged</b> into you? Pick 🛡️ <b>Hold</b>.</li><li>Attacking a garrison that likes to <b>hold</b> (castles, builders)? Pick 🏹 <b>Flank</b>.</li><li>Facing a lord who <b>flanks</b>? Pick ⚔️ <b>Charge</b>.</li><li>No idea? Rivals open with Charge a lot, so 🛡️ Hold is the safe counter; the stance is secret until the clash.</li></ul></details>`;
       const castleFoe = MAP.adj[sel].some(n => S.counties[n].castle > 0 && S.counties[n].owner !== seat && S.counties[n].owner >= 0);
       if (castleFoe) h += `<label class="stormtoggle"><input type="checkbox" data-stormtoggle ${marchStorm ? 'checked' : ''}> 💥 Storm walls on arrival <small>(otherwise you besiege)</small></label>`;
       for (const n of MAP.adj[sel]) {
@@ -410,7 +434,7 @@ function renderCounty() {
       h += '<h3>Recruit</h3><div class="recgrid">';
       for (const ut of B.UNIT_TYPES) {
         const u = UNITS[ut], err = B.checkNewOrder(S, seat, { type: 'recruit', unit: ut, county: sel }, orders);
-        h += `<button class="btn rec" data-rec="${ut}" ${err ? 'disabled' : ''} title="${esc(err || '')}">${img(unitArt({ type: ut }), 'rthumb', '')}<span>${u.icon} ${u.name}<br><small>${u.cost}g · pow ${u.str}${u.capitalOnly ? ' · capital' : ''}${u.needCastle ? ' · castle' : ''}</small></span></button>`;
+        h += `<button class="btn rec" data-rec="${ut}" ${err ? 'disabled' : ''} title="${esc(err || '')}">${img(unitArt({ type: ut }), 'rthumb', '')}<span>${u.icon} ${u.name}<br><small>${B.rcost(S, seat, ut)}g${B.rcost(S, seat, ut) < u.cost ? ' ✂' : ''} · pow ${u.str}${u.capitalOnly ? ' · capital' : ''}${u.needCastle ? ' · castle' : ''}</small></span></button>`;
       }
       h += '</div>';
       if (hostile) h += '<div class="muted">Enemies occupy this county: no recruiting.</div>';
@@ -420,7 +444,7 @@ function renderCounty() {
       else h += `<div class="muted">Three free identical units in one county can merge into a Banner worth 1.5× their sum.</div>`;
       if (c.castle < 3 && !c.build) {
         const nl = CASTLE[c.castle + 1], err = B.checkNewOrder(S, seat, { type: 'build', county: sel }, orders);
-        h += `<h3>Fortify</h3><button class="btn opt" data-build ${err ? 'disabled' : ''} title="${esc(err || '')}">🔨 Build <b>${nl.name}</b> · ${nl.cost}g · ${nl.time} season${nl.time > 1 ? 's' : ''}<br><small>Defence +${Math.round(nl.def * 100)}%, food stores ${nl.cap}${c.castle + 1 >= 2 ? ', attackers need siege engines to storm' : ''}.</small></button>`;
+        h += `<h3>Fortify</h3><button class="btn opt" data-build ${err ? 'disabled' : ''} title="${esc(err || '')}">🔨 Build <b>${nl.name}</b> · ${B.buildCost(S, seat, c.castle + 1)}g · ${nl.time} season${nl.time > 1 ? 's' : ''}<br><small>Defence +${Math.round(nl.def * 100)}%, food stores ${nl.cap}${c.castle + 1 >= 2 ? ', attackers need siege engines to storm' : ''}.</small></button>`;
       }
     }
   }
@@ -439,12 +463,14 @@ function renderOrders() {
     orders.forEach((o, i) => { h += `<li class="${o.type}"><span>${esc(B.describeOrder(S, o))}</span><button class="x" data-rm="${i}" title="Remove" ${phase !== 'plan' ? 'disabled' : ''}>✕</button></li>`; });
     h += '</ul>';
   }
-  const me = S.players[seat], fcost = B.FEINT_COST;
+  const me = S.players[seat], fcost = B.feintCost(S, seat), scost = B.spyCost(S, seat);
   const canPlan = phase === 'plan';
   const nInc2 = B.incoming(S, seat).filter(p => !orders.some(o => o.type === 'dip' && o.act === 'respond' && o.pid === p.id)).length;
   h += `<div class="row"><button class="btn small" data-dipopen>🤝 Envoys & diplomacy${nInc2 ? ` <b class="badge">${nInc2}</b>` : ''}</button><span class="muted">Pacts, trade, tribute, ransom. Free: ${B.DIP_MAX} a season.</span></div>`;
   h += `<div class="row"><button class="btn small" data-feintpick ${canPlan && !B.checkNewOrder(S, seat, { type: 'feint', to: firstFeintTarget(seat) }, orders) ? '' : 'disabled'} title="Show a fake army near a county. Rivals who can see it will believe it.">🎭 Feint (${fcost}g)…</button>
-    <span class="muted">Fake army shown to rivals who can see the county.</span></div>`;
+    <span class="muted">Fake army shown to rivals who can see the county.</span></div>
+    <div class="row"><button class="btn small" data-spypick ${canPlan && !B.checkNewOrder(S, seat, { type: 'spy', target: firstSpyTarget(seat) }, orders) ? '' : 'disabled'} title="Reveal a county (up to 3 away) without a scout unit, and see through feints there.">🕵️ Spy (${scost}g)…</button>
+    <span class="muted">Reveals a county and exposes feints for 2 seasons.</span></div>`;
   let label;
   if (phase === 'plan') label = mode === 'hotseat' ? `🔒 Seal & pass device (${orders.filter(o => o.type !== 'dip').length}/${B.MAX_ORDERS})` : mode === 'async' ? `🔒 Seal orders (${orders.filter(o => o.type !== 'dip').length}/${B.MAX_ORDERS})` : `📜 Seal Orders (${orders.filter(o => o.type !== 'dip').length}/${B.MAX_ORDERS})`;
   else label = phase === 'reveal' ? 'Revealing…' : phase === 'wait' ? 'Waiting for others…' : 'Game over';
@@ -452,13 +478,47 @@ function renderOrders() {
   el.innerHTML = h;
   $('#sealbar').innerHTML = `<button class="btn primary" data-seal ${phase !== 'plan' ? 'disabled' : ''}>${label}</button>`;
 }
+function firstSpyTarget(seat) { for (const c of S.counties) if (c.owner !== seat && !B.checkNewOrder(S, seat, { type: 'spy', target: c.id }, ordersOf(seat))) return c.id; return 0; }
 function firstFeintTarget(seat) { for (const c of S.counties) if (c.owner !== seat && !B.checkNewOrder(S, seat, { type: 'feint', to: c.id }, ordersOf(seat))) return c.id; return 0; }
+
+/* ------------------------------------------------------------ tutorial coach & scenario goals */
+function goalText(g) {
+  if (g.kind === 'tutorial') return 'Take one enemy county and sign any pact.';
+  if (g.kind === 'own') return `Hold ${Math.round(g.share * 100)}% of the counties (${Math.ceil(g.share * MAP.n)}) for ${g.hold} seasons in a row.`;
+  if (g.kind === 'survive') return `Survive to season ${g.turns} with at least ${g.min} counties.`;
+  if (g.kind === 'league') return `Be allied with houses that together hold ${Math.round(g.share * 100)}% of the realm for ${g.hold} seasons.`;
+  return 'Win the realm outright.';
+}
+function renderCoach() {
+  const el = $('#coach');
+  if (!S || !S.scn || phase === 'menu' || phase === 'pass') { el.hidden = true; return; }
+  const g = S.scn, sc = B.scenarioById(g.id), seat = 0, mine = B.countiesOf(S, seat).length;
+  let h = `<div class="coachhead"><b>${sc.icon} ${esc(sc.title)}</b> <span class="muted small">· ${esc(goalText(g.goal))}</span>`;
+  if (g.id === 'tutorial' && !coachSkip) h += ` <button class="btn tiny" data-coachskip>Skip tutorial</button>`;
+  h += '</div>';
+  if (g.goal.kind === 'own' || g.goal.kind === 'league') h += `<div class="muted small">Progress: ${g.n}/${g.goal.hold} seasons held · you hold ${mine}/${MAP.n} counties · season ${S.turn + 1}/${g.limit}</div>`;
+  else if (g.goal.kind === 'survive') h += `<div class="muted small">Season ${S.turn + 1}/${g.goal.turns} · you hold ${mine} counties (need ${g.goal.min})</div>`;
+  if (g.id === 'tutorial' && !coachSkip && V != null) {
+    const orders = ordersOf(V) || [];
+    const steps = [
+      ['Tap your capital ⚜ (gold-bordered) on the map to see your armies and what you can do there.', () => coachTapped || S.turn > 0 || orders.length > 0],
+      ['Recruit: with your capital selected, press a unit under <b>Recruit</b> (Levies are cheap).', () => orders.some(o => o.type === 'recruit') || S.turn > 0],
+      ['March: tick units in a county you own, pick a secret stance, then press a neighbouring <b>enemy</b> county to attack it. Hover a destination to preview the path.', () => orders.some(o => o.type === 'march') || mine > g.start],
+      ['Diplomacy: open <b>🤝 Diplomacy</b> and offer your rival a <b>Non-aggression pact</b>. In this lesson they will accept.', () => orders.some(o => o.type === 'dip') || S.dip.pacts.length > 0 || Object.keys(S.dip.stats.formed).length > 0],
+      ['Seal: press <b>📜 Seal Orders</b>. Everything resolves at once; watch the Chronicle.', () => S.turn > 0]
+    ];
+    const cur = steps.findIndex(x => !x[1]());
+    if (cur >= 0 && S.turn === 0) h += `<div class="coachstep"><span class="dots">${steps.map((_, i) => `<i class="${i < cur ? 'done' : i === cur ? 'now' : ''}"></i>`).join('')}</span> <b>Step ${cur + 1}/${steps.length}.</b> ${steps[cur][0]}</div>`;
+    else h += `<div class="coachstep">✅ <b>${mine > g.start ? 'County taken' : 'Take a county'}</b> · ${Object.keys(S.dip.stats.formed).length ? '✅ <b>Pact signed</b>' : '⬜ <b>Make a pact</b> (🤝 Diplomacy → Non-aggression)'} · Do both to finish the lesson.</div>`;
+  }
+  el.innerHTML = h; el.hidden = false;
+}
 
 /* ------------------------------------------------------------ chronicle + cards */
 function appendLog(ev, isNew) {
   if (!evVisible(ev)) return;
   const log = $('#log'), div = document.createElement('div');
-  div.className = 'ev ' + ev.kind + (isNew ? ' new' : '');
+  div.className = 'ev ' + ev.kind + ' g-' + logGroup(ev) + (isNew ? ' new' : '');
   if (ev.battle) {
     const b = ev.battle, sn = s => STANCE_INFO[s].icon + ' ' + STANCE_INFO[s].name;
     const side = (x, win) => `<div class="s ${win ? 'win' : ''}"><b>${esc(pl(x.owner).short)} · ${sn(x.stance)}</b>power ${f1(x.power)}<br><small>${esc(x.units)}</small></div>`;
@@ -466,20 +526,32 @@ function appendLog(ev, isNew) {
   } else div.textContent = ev.text;
   log.appendChild(div); log.scrollTop = log.scrollHeight;
 }
+function logGroup(ev) {
+  if (['battle', 'capture', 'alarm', 'move', 'movement'].includes(ev.kind)) return 'battle';
+  if (ev.kind === 'pact' || (ev.card && /^(pact_|betrayal|crisis_)/.test(ev.card.key)) || /BETRAYAL|denounce|league|envoy|ransom|tribute|pact/i.test(ev.text || '')) return 'dip';
+  if (['econ', 'recruit', 'event', 'hero', 'decree'].includes(ev.kind)) return 'econ';
+  return 'misc';
+}
+function setLogFilter(f) {
+  logFilter = f; const log = $('#log');
+  log.className = 'log' + (f === 'all' ? '' : ' f-' + f);
+  document.querySelectorAll('#logFilter [data-lf]').forEach(b => b.classList.toggle('on', b.dataset.lf === f));
+  log.scrollTop = log.scrollHeight;
+}
 function rebuildLog() { $('#log').innerHTML = ''; for (const ev of S.log.slice(-40)) appendLog(ev, false); }
 let cardTimer = null;
 function showCard(card, ev) {
   if (fast) return;
   const art = eventArt(card.key) || (/^hero_/.test(card.key) ? heroArt({ id: (card.hero || card.title || '').length * 7 + 3 }) : null);
   const el = $('#cardlayer');
-  el.innerHTML = `<div class="evcard ${esc(card.key)}">${card.a != null ? `<div class="evcrests">${portrait(S.players[card.a])}<span>${card.key === 'betrayal' ? '🗡️' : '🤝'}</span>${portrait(S.players[card.b])}</div>` : img(art, 'evart', '')}<div class="evbody"><div class="evtitle">${esc(card.icon)} ${esc(card.title)}</div><div>${esc(card.text)}</div></div></div>`;
+  el.innerHTML = `<div class="evcard ${esc(card.key)}">${card.a != null && !eventArt(card.key) ? `<div class="evcrests">${portrait(S.players[card.a])}<span>${card.key === 'betrayal' ? '🗡️' : '🤝'}</span>${portrait(S.players[card.b])}</div>` : img(art, 'evart', '')}<div class="evbody"><div class="evtitle">${esc(card.icon)} ${esc(card.title)}</div><div>${esc(card.text)}</div></div></div>`;
   el.classList.add('show'); clearTimeout(cardTimer); cardTimer = setTimeout(() => el.classList.remove('show'), 3300);
   el.onclick = () => { el.classList.remove('show'); };
 }
 
 /* ------------------------------------------------------------ modals */
-function showModal(html, cls) { dipOpen = false; const m = $('#modalbox'); m.className = 'modalbox ' + (cls || ''); m.innerHTML = html; $('#modal').hidden = false; }
-function hideModal() { dipOpen = false; $('#modal').hidden = true; const m = $('#modalbox'); m.onclick = null; m.oninput = null; m.onchange = null; m.innerHTML = ''; }
+function showModal(html, cls) { const m = $('#modalbox'); m.className = 'modalbox ' + (cls || ''); m.innerHTML = html; $('#modal').hidden = false; }
+function hideModal() { $('#modal').hidden = true; const m = $('#modalbox'); m.onclick = null; m.oninput = null; m.onchange = null; m.innerHTML = ''; }
 const modalOpen = () => !$('#modal').hidden;
 
 
@@ -499,6 +571,7 @@ function pactTerms(k) {
   const n = i => S.players[i].short;
   if (k.type === 'trade') return `${n(k.terms.goldFrom)} pays 10g ⇄ ${n(k.terms.grainFrom)} sends 14 grain`;
   if (k.type === 'tribute') return `${n(k.terms.payer)} pays ${n(k.terms.payee)} ${k.terms.amt}g`;
+  if (k.type === 'alliance' && k.terms && k.terms.vs != null) return 'Sworn against ' + S.players[k.terms.vs].short + '. ' + PACT.alliance.blurb;
   return PACT[k.type].blurb;
 }
 function propText(p) {
@@ -506,6 +579,7 @@ function propText(p) {
   if (p.kind === 'ransom') { const h = S.heroes.find(x => x.id === t.hid); const nm = h ? h.name : 'a hero'; return h && h.owner === p.to ? `${f} holds <b>${esc(nm)}</b> captive and asks <b>${t.price} gold</b> from you to free them.` : `${f} offers <b>${t.price} gold</b> to ransom <b>${esc(nm)}</b>, whom you hold.`; }
   if (p.kind === 'tribute') return t.dir === 'demand' ? `${f} <b>DEMANDS ${t.amount} gold</b> every season for ${PACT.tribute.dur} seasons. Accept and you are left in peace; refuse and they may come for you.` : `${f} offers you <b>${t.amount} gold</b> every season for ${PACT.tribute.dur} seasons, in return for peace.`;
   if (p.kind === 'trade') return t.dir === 'buy' ? `${f} wants to buy <b>14 grain</b> for <b>10 gold</b> from you every season (${PACT.trade.dur} seasons).` : `${f} wants to sell you <b>14 grain</b> for <b>10 gold</b> every season (${PACT.trade.dur} seasons).`;
+  if (p.kind === 'alliance' && t.vs != null) return `${f} proposes a <b>League against ${esc(S.players[t.vs].short)}</b>: an alliance to stop the realm's leader. ${PACT.alliance.blurb}`;
   return `${f} proposes a <b>${PACT[p.kind].name.toLowerCase()}</b>. ${PACT[p.kind].blurb}`;
 }
 function dipHtml() {
@@ -513,8 +587,10 @@ function dipHtml() {
   let h = `<h2>🤝 Diplomacy</h2>`;
   if (uiMsg) h += `<div class="ev warn" id="dipmsg">${esc(uiMsg)}</div>`;
   h += `<div class="dipme">${portrait(me)}<div><b>${esc(lordName(seat))}</b><br>Reputation <b>${Math.round(me.rep)}</b> · ${repLabel(me.rep)}<div class="bar"><i style="width:${Math.round(me.rep)}%"></i></div><small class="muted">${repEffect(me.rep)}</small></div></div>`;
-  h += `<details class="dipinfo"><summary>How diplomacy works</summary><p class="muted small">Envoys are <b>free</b> (up to ${B.DIP_MAX} a season, on top of your 5 orders) and sealed with your orders. A proposal reaches its target when the season resolves; they answer in the next planning phase and a signed pact takes effect when that season resolves. Marching into a partner's land <b>breaks the pact</b> (betrayal) at the same moment, and every house remembers.</p></details>`;
+  h += `<div class="muted small" style="margin:2px 0">🕊️ Influence <b>${me.infl}</b>/6: each offer costs 1 (+1 a season). A refused offer cannot be repeated for 3 seasons.${B.leaderOf(S) != null ? ` 👑 <b>${esc(S.players[B.leaderOf(S)].short)}</b> leads the realm: a <b>League</b> (alliance against the leader) is easy to sell.` : ''}</div>
+  <details class="dipinfo"><summary>How diplomacy works</summary><p class="muted small">Envoys are <b>free</b> (up to ${B.DIP_MAX} a season, on top of your 5 orders) and sealed with your orders. A proposal reaches its target when the season resolves; they answer in the next planning phase and a signed pact takes effect when that season resolves. Marching into a partner's land <b>breaks the pact</b> (betrayal) at the same moment, and every house remembers.</p></details>`;
   if (!canAct) h += `<div class="ev info">Browsing only: envoys can be sent during your planning phase.</div>`;
+  if (canAct && !S.dip.pacts.length && !S.dip.stats.proposed && !orders.some(o => o.type === 'dip')) h += `<div class="ev info tipbox">💡 <b>First time?</b> Offer a <b>🤝 Non-aggression pact</b> to a neighbour below: it costs nothing but 1 influence, and neither of you may enter the other's land for 8 seasons. They answer next season.</div>`;
   // incoming
   const inc = B.incoming(S, seat);
   h += `<h3>✉ Proposals to you (${inc.length})</h3>`;
@@ -544,6 +620,7 @@ function dipHtml() {
       h += `<div class="dacts">`;
       h += act({ type: 'dip', act: 'propose', kind: 'nap', to: p.id }, '🤝 Non-aggression');
       h += act({ type: 'dip', act: 'propose', kind: 'alliance', to: p.id }, '⚜️ Alliance');
+      { const L0 = B.leaderOf(S); if (L0 != null && L0 !== seat && L0 !== p.id) h += act({ type: 'dip', act: 'propose', kind: 'alliance', to: p.id, vs: L0 }, `🛡 League against ${esc(S.players[L0].short)}`, 'good'); }
       if (rel === 'war') h += act({ type: 'dip', act: 'propose', kind: 'peace', to: p.id }, '🕊️ Peace', 'good');
       h += act({ type: 'dip', act: 'propose', kind: 'trade', to: p.id, dir: 'buy' }, '⚖️ Buy grain');
       h += act({ type: 'dip', act: 'propose', kind: 'trade', to: p.id, dir: 'sell' }, '⚖️ Sell grain');
@@ -575,9 +652,10 @@ function dipHtml() {
 }
 function showDip() {
   if (!S || phase === 'menu' || phase === 'pass') return;
-  const mb = $('#modalbox'), st = dipOpen ? mb.scrollTop : 0;
-  showModal(dipHtml(), 'wide dip'); dipOpen = true; $('#modalbox').scrollTop = st;
+  const box = $('#dipbox'), st = dipOpen ? box.scrollTop : 0;
+  box.innerHTML = dipHtml(); $('#dipdrawer').hidden = false; document.body.classList.add('dipopen'); dipOpen = true; box.scrollTop = st; dipFirstSeen = true;
 }
+function hideDip() { dipOpen = false; $('#dipdrawer').hidden = true; document.body.classList.remove('dipopen'); }
 
 function helpHtml() {
   return `<h2>How to Play</h2>
@@ -608,6 +686,14 @@ function helpHtml() {
   <li><b>🤝 Non-aggression</b> (8 seasons): neither side may enter the other's land. <b>⚜️ Alliance</b>: shared vision, free passage, armies fight side by side, and if <i>every</i> surviving house is allied with every other for 4 seasons, they <b>share the victory</b>. <b>🕊️ Peace</b> ends a war and lifts sieges. <b>⚖️ Trade</b>: 10 gold for 14 grain each season. <b>💰 Tribute</b>: demand (or offer) 10-30 gold a season for 4 seasons. <b>⛓ Ransom</b>: hold a captured hero and trade them back.</li>
   <li><b>Betrayal</b>: marching into a partner's land (an ally needs the explicit 🗡️ <i>Betray</i> button) breaks the pact in the same instant the season resolves: war, heavy <b>reputation</b> loss and restless counties. Reputation and each house's <b>trust</b> in you decide who will sign with you. A pact signed this season halts an army that was already ordered across the border.</li>
   <li>Rivals decide by character: <b>🏰 Builders</b> are the most loyal and sign readily, <b>🎭 Schemers</b> sign too and are the likeliest to stab you in the back once you look weak, <b>⚔️ Warlords</b> demand tribute from weaker neighbours. Pacts and betrayals are public in the Chronicle; proposals are private.</li></ul>
+  <h3>👑 New in this version</h3>
+  <ul><li><b>Crown claim</b>: from season ${'30'} (season 20 with two houses) the house with the clear lead is the <b>claimant</b>; hold the lead for 10 seasons (7 with two houses) and the nobles crown you. Big realms strain: <b>empire overhead</b> eats taxes and unrest grows, so leaders must keep winning.</li>
+  <li><b>Leagues</b>: when a house runs away with the realm, rivals sign alliances <i>against</i> it. A <b>League</b> that holds 75% of the land for 8 seasons shares the victory.</li>
+  <li><b>Influence</b> 🕊️: every diplomatic offer costs 1 (you earn 1 a season, up to 6). Refused offers cool down for 3 seasons.</li>
+  <li><b>House styles</b>: 🏰 Builder (cheaper castles, +10% defence), ⚔️ Warlord (plunder gold, cheap knights anywhere), 🎭 Schemer (cheap spies, scouts and feints).</li>
+  <li>🕵️ <b>Spy</b> (12g): reveals a county without a scout and exposes feints there. Heroes may earn 🕊️ Diplomat, 🕵️ Spymaster or 📦 Quartermaster, and go on <b>quests</b>. <b>Crises</b> (papal truce, interdict, succession disputes, royal marriages) reshuffle the pacts.</li>
+  <li>Trailing houses can get a <b>Lombard loan</b> and cheaper mercenaries. Sieges starve faster, sallies can break a siege and burn the engines.</li>
+  <li><b>Campaign</b>: the New Game dialog has a 🎓 tutorial and four linked scenarios; each win gives a legacy bonus in the next.</li></ul>
   <h3>👥 Hotseat</h3><p>2–4 humans on one device (plus any AI rivals). Each lord gets a <b>pass-the-device</b> screen that hides the map and orders. When everyone has sealed, the reveal is public (everyone sees what any human can see).</p>
   <h3>🔗 Play by link (no server)</h3>
   <ol><li>One player picks <b>Play by link</b>, names the players and presses Create. The <b>game code</b> is shown: send it to the others (chat, email).</li>
@@ -657,13 +743,15 @@ function gameOverModal() {
     const w = S.players[o.winner];
     const mineWin = G && G.mode === 'solo' ? (o.winners || [o.winner]).includes(0) : (o.winners || [o.winner]).some(x => hs.includes(x));
     const winners = o.winners || [o.winner];
-    title = G && G.mode === 'solo' ? (mineWin ? 'Victory!' : 'Defeat') : o.reason === 'alliance' ? 'A grand alliance wins!' : `${esc(lordName(o.winner))} wins!`;
+    title = G && G.mode === 'solo' ? (mineWin ? 'Victory!' : 'Defeat') : o.reason === 'alliance' ? 'A League rules the realm!' : o.reason === 'claim' ? `${esc(lordName(o.winner))} is crowned!` : `${esc(lordName(o.winner))} wins!`;
     icon = mineWin ? '👑' : '💀';
-    text = o.reason === 'alliance' ? `Every house that remains has sworn the same oath. ${(o.winners || []).map(i => S.players[i].short).join(', ')} share the victory, and ${w.name} holds the most land.` : o.reason === 'banner' ? `${w.name} holds the last Royal Banner. ${mineWin ? 'The kingdom kneels.' : 'Your line ends here.'}` : `After 25 years, ${w.name} holds the most land and is crowned.`;
+    text = o.reason === 'scenario' ? 'You achieved the scenario goal.' : o.reason === 'scenario_fail' ? 'The scenario goal was not met.' : o.reason === 'claim' ? `${w.name} held the lead long enough: the nobles acclaim a new sovereign.${mineWin ? ' It is you!' : ''}` : o.reason === 'alliance' ? `The League of ${(o.winners || []).map(i => S.players[i].short).join(' & ')} holds the realm. They share the victory, and ${w.name} holds the most land.` : o.reason === 'banner' ? `${w.name} holds the last Royal Banner. ${mineWin ? 'The kingdom kneels.' : 'Your line ends here.'}` : `After 25 years, ${w.name} holds the most land and is crowned.`;
   }
+  let nextBtn = '';
+  if (S.scn) { const sc = B.scenarioById(S.scn.id), won = o.reason === 'scenario' && o.winner === 0; if (won) { campWin(sc.id); const i = B.SCENARIOS.findIndex(x => x.id === sc.id), nx = B.SCENARIOS[i + 1]; if (nx) nextBtn = `<button class="btn primary" data-scn="${nx.id}" style="margin-right:8px">Next: ${esc(nx.title)} ▶</button>`; } else nextBtn = `<button class="btn" data-scn="${sc.id}" style="margin-right:8px">Try again</button>`; }
   const rows = S.players.map(p => `<li>${tag(p.id)} ${esc(p.lord || p.short)}${p.ai ? ' ' + PERSONALITIES[p.ai.personality].icon : ''}: ${p.alive ? B.countiesOf(S, p.id).length + ' counties' : 'fallen'} · reputation ${Math.round(p.rep)}${(S.over.winners || [S.over.winner]).includes(p.id) ? ' 👑' : ''}</li>`).join('');
   showModal(`<div class="big">${icon}</div><h2 style="text-align:center">${title}</h2><p style="text-align:center">${esc(text)}</p>
-    <p class="muted" style="text-align:center">${SEASONS[S.season]}, Year ${S.year}</p><ul>${rows}</ul><button class="btn primary" id="again">New game</button>`);
+    <p class="muted" style="text-align:center">${SEASONS[S.season]}, Year ${S.year}</p><ul>${rows}</ul>${nextBtn}<button class="btn primary" id="again">New game</button>`);
 }
 
 /* ------------------------------------------------------------ new game dialog */
@@ -672,11 +760,15 @@ function newGameHtml() {
   const pers = Object.keys(PERSONALITIES);
   return `<div class="splash">${img(ART.splash, 'splashimg', '')}<div class="splashtitle">⚜ Banners of the Realm</div></div>
   <h2>New Game</h2>
+  <h3>🎓 Tutorial & Campaign <span class="muted small">(solo)</span></h3>
+  <div class="scngrid">${B.SCENARIOS.map(sc => `<button class="scncard" data-scn="${sc.id}" title="${esc(sc.blurb)}"><span class="scnart">${img(SCN_ART[sc.id] && artPath(SCN_ART[sc.id][0], SCN_ART[sc.id][1]), 'scnimg', '')}</span><b>${sc.icon} ${esc(sc.title)}${campDone().includes(sc.id) ? ' ✓' : ''}</b><small>${esc(sc.blurb)}</small></button>`).join('')}</div>
+  <h3>⚔ Custom game</h3>
   <div class="ngrid">
     <label>Mode</label><div class="seg" id="ngMode"><button class="btn on" data-v="solo">Solo vs rivals</button><button class="btn" data-v="hotseat">Hotseat</button><button class="btn" data-v="async">Play by link</button></div>
     <label id="lblHumans">Human lords</label><div class="seg" id="ngHumans"><button class="btn on" data-v="1">1</button></div>
     <label>Rival AI lords</label><div class="seg" id="ngRivals"></div>
-    <label>Difficulty</label><div class="seg" id="ngLevel">${Object.keys(DIFFICULTY).map(k => `<button class="btn ${k === 'normal' ? 'on' : ''}" data-v="${k}">${DIFFICULTY[k].name}</button>`).join('')}</div>
+    <label>Difficulty</label><div><div class="seg" id="ngLevel">${Object.keys(DIFFICULTY).map(k => `<button class="btn ${k === 'normal' ? 'on' : ''}" data-v="${k}">${DIFFICULTY[k].name}</button>`).join('')}</div><div class="muted small" id="ngLevelDesc"></div></div>
+    <label id="lblStyle">Your house</label><div><div class="seg" id="ngStyle">${Object.keys(STYLE_INFO).map(k => `<button class="btn ${k === NG.style ? 'on' : ''}" data-v="${k}">${STYLE_INFO[k].icon} ${STYLE_INFO[k].name}</button>`).join('')}</div><div class="muted small" id="ngStyleDesc"></div></div>
     <label>Map</label><div id="ngMap" class="muted"></div>
   </div>
   <div id="ngNames"></div>
@@ -684,7 +776,10 @@ function newGameHtml() {
   <div class="ngrid"><label>Seed <small>(optional)</small></label><input id="ngSeed" class="inp" placeholder="random" inputmode="numeric"></div>
   <div class="row" style="margin-top:10px"><button class="btn primary" id="ngStart" style="flex:2">Begin the campaign</button><button class="btn" id="ngJoin" style="flex:1">Join a link game…</button><button class="btn" id="ngCancel" style="flex:0 0 auto">Cancel</button></div>`;
 }
-const NG = { mode: 'solo', humans: 1, rivals: 1, level: 'normal', pers: [] };
+const NG = { mode: 'solo', humans: 1, rivals: 1, level: 'normal', pers: [], style: 'builder' };
+const SCN_ART = { tutorial: ['castles', 'keep'], c1: ['lords', 'warlord'], c2: ['events', 'winter'], c3: ['events', 'mercenary'], c4: ['lords', 'schemer'] };
+function campDone() { try { return JSON.parse(localStorage.getItem('botr_camp') || '[]'); } catch (e) { return []; } }
+function campWin(id) { try { const d = campDone(); if (!d.includes(id)) { d.push(id); localStorage.setItem('botr_camp', JSON.stringify(d)); } } catch (e) { /* ignore */ } }
 function ngRefresh() {
   const solo = NG.mode === 'solo';
   const hmin = solo ? 1 : 2, hmax = solo ? 1 : 4;
@@ -698,6 +793,10 @@ function ngRefresh() {
   $('#ngMap').textContent = total <= 2 ? 'Small realm (15 counties)' : `Great realm (28 counties), ${total} houses; starting corners drawn by lot`;
   document.querySelectorAll('#ngMode .btn').forEach(b => b.classList.toggle('on', b.dataset.v === NG.mode));
   document.querySelectorAll('#ngLevel .btn').forEach(b => b.classList.toggle('on', b.dataset.v === NG.level));
+  $('#ngLevelDesc').textContent = LEVEL_INFO[NG.level];
+  document.querySelectorAll('#ngStyle .btn').forEach(b => b.classList.toggle('on', b.dataset.v === NG.style));
+  $('#ngStyleDesc').textContent = STYLE_INFO[NG.style].perk;
+  $('#lblStyle').textContent = solo ? 'Your house' : 'Lord 1 house';
   const names = $('#ngNames');
   if (!solo) {
     const old = [...names.querySelectorAll('input')].map(i => i.value);
@@ -724,6 +823,7 @@ function openNewGame() {
       if (id === 'ngHumans') NG.humans = +v;
       if (id === 'ngRivals') NG.rivals = +v;
       if (id === 'ngLevel') NG.level = v;
+      if (id === 'ngStyle') NG.style = v;
       ngRefresh(); return;
     }
     if (t.id === 'ngCancel') { hideModal(); if (!S) openNewGame(); return; }
@@ -739,12 +839,22 @@ function startFromDialog() {
   const players = [];
   const names = [...document.querySelectorAll('#ngNames input')].map(i => i.value.trim());
   const policy = NG.mode === 'async' ? { prisoners: ($('#ngPris') || {}).value || 'press', hero: ($('#ngHero') || {}).value || 'ransom' } : null;
-  for (let i = 0; i < NG.humans; i++) players.push(NG.mode === 'solo' ? { name: '' } : { name: names[i] || LORD_NAMES[i], policy });
+  const hst = i => i === 0 ? NG.style : (['builder', 'warlord', 'schemer'][i % 3]);
+  for (let i = 0; i < NG.humans; i++) players.push(NG.mode === 'solo' ? { name: '', style: NG.style } : { name: names[i] || LORD_NAMES[i], policy, style: hst(i) });
   for (let i = 0; i < NG.rivals; i++) players.push({ ai: { personality: personalities[i] && personalities[i] !== 'random' ? personalities[i] : pk[rnd()], level: NG.level } });
   const seedTxt = ($('#ngSeed').value || '').trim();
   const seed = seedTxt ? (parseInt(seedTxt, 10) >>> 0) : rid();
   hideModal(); $('#modalbox').onchange = null;
   startGame(NG.mode, NET.makeSetup(seed, players));
+}
+
+function startScenario(id) {
+  const sc = B.scenarioById(id); if (!sc) return;
+  const done = campDone(), legacy = [];
+  if (id !== 'tutorial') { if (done.includes('c1')) legacy.push('gold'); if (done.includes('c2')) legacy.push('hero'); if (done.includes('c3')) legacy.push('infl'); }
+  const players = [{ name: '', style: sc.style || NG.style }].concat(sc.ais.map(a => ({ ai: { personality: a[0], level: a[1] } })));
+  hideModal(); $('#modalbox').onchange = null;
+  startGame('solo', NET.makeSetup(rid(), players, { scn: id, legacy }));
 }
 
 /* ------------------------------------------------------------ persistence */
@@ -753,14 +863,14 @@ function save() {
     if (!G) return;
     if (G.mode === 'async') { localStorage.setItem(ASYNC_KEY, JSON.stringify({ rec: G.rec })); localStorage.setItem('botr_active', 'async'); return; }
     if (S.over) { localStorage.removeItem(SAVE_KEY); return; }
-    localStorage.setItem(SAVE_KEY, JSON.stringify({ mode: G.mode, setup: G.setup, S, orders: G.orders, sealed: G.sealed, idx: G.idx, v: 3 }));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ mode: G.mode, setup: G.setup, S, orders: G.orders, sealed: G.sealed, idx: G.idx, v: 4 }));
     localStorage.setItem('botr_active', 'local');
   } catch (e) { /* storage full or blocked */ }
 }
 
 /* ------------------------------------------------------------ game flow */
 function startGame(mode, setup) {
-  clearTimeout(timer); gen = null; resolving = null; pickMode = null; flashC = null; movingIds = null; tokenSigs = {}; fast = false;
+  clearTimeout(timer); gen = null; resolving = null; pickMode = null; flashC = null; movingIds = null; tokenSigs = {}; fast = false; preview = null; coachSkip = false; coachTapped = false; hideDip();
   $('#btnSkip').hidden = true;
   G = { mode, setup, orders: {}, sealed: {}, idx: 0 };
   if (mode === 'async') { G.rec = NET.newRecord(setup, 0); S = NET.stateOf(G.rec); }
@@ -792,7 +902,7 @@ function beginPlanning(first) {
 }
 function startPass(i) {
   const hs = aliveHumanSeats();
-  G.idx = i; V = null; phase = 'pass'; selFor = null; hideModal();
+  G.idx = i; V = null; phase = 'pass'; selFor = null; hideModal(); hideDip();
   const seat = hs[i], p = S.players[seat];
   $('#pass').hidden = false;
   $('#pass').innerHTML = `<div class="passbox"><div class="passcrest" style="border-color:${p.color}">${crestArt(seat) ? img(crestArt(seat), 'crestimg', '') : '⚜'}</div>
@@ -812,7 +922,8 @@ function render() {
   const hidden = phase === 'pass' || phase === 'menu';
   $('#app').classList.toggle('veiled', hidden);
   renderHeader(); renderMap(); renderCounty(); renderOrders(); applyView();
-  if (dipOpen && modalOpen()) showDip();
+  if (dipOpen) { if (phase === 'menu' || phase === 'pass') hideDip(); else showDip(); }
+  renderCoach();
   $('#btnLink').hidden = !(G && G.mode === 'async');
 }
 
@@ -840,7 +951,7 @@ function seal() {
 }
 function startReveal(rs) {
   phase = 'reveal'; V = null; fast = false; uiMsg = ''; flashC = null; movingIds = null;
-  $('#btnSkip').hidden = false; $('#pass').hidden = true; hideModal();
+  $('#btnSkip').hidden = false; $('#pass').hidden = true; hideModal(); hideDip();
   if (rs) { resolving = rs; gen = rs.gen; }
   else { resolving = null; gen = B.resolveTurn(S, NET.collectOrders(S, G.orders)); }
   answer = undefined; G.orders = {};
@@ -872,7 +983,7 @@ function step() {
       render(); animateMoves(ev, () => schedule(250)); return;
     }
     flashC = ev.county != null && !['phase', 'econ', 'event'].includes(ev.kind) ? { id: ev.county, bad: ev.kind === 'battle' } : null;
-    if (ev.kind === 'alarm' || ev.kind === 'win') flashC = { id: ev.county, bad: true };
+    if ((ev.kind === 'alarm' || ev.kind === 'win') && ev.county != null) flashC = { id: ev.county, bad: true };
     if (ev.kind === 'battle' && !fast) clashFx(ev);
     if (ev.kind === 'alarm' || ev.kind === 'capture') sfx.drum(0, 0.5, 90);
     if (ev.kind === 'econ' || ev.kind === 'recruit') { /* quiet */ }
@@ -1020,11 +1131,11 @@ document.addEventListener('click', e => {
   if (cg) {
     const id = +cg.dataset.c;
     if (pickMode && phase === 'plan') {
-      const o = pickMode.type === 'scout' ? { type: 'scout', from: pickMode.from, target: id } : { type: 'feint', to: id };
+      const o = pickMode.type === 'scout' ? { type: 'scout', from: pickMode.from, target: id } : pickMode.type === 'spy' ? { type: 'spy', target: id } : { type: 'feint', to: id };
       if (!pickTargetOK(id)) { uiMsg = B.checkNewOrder(S, V, o, G.orders[V]) || 'Not a valid target.'; render(); return; }
       addOrder(o); return;
     }
-    sel = id; selFor = null; uiMsg = ''; render(); return;
+    sel = id; selFor = null; uiMsg = ''; coachTapped = true; render(); return;
   }
   let b;
   if ((b = q('[data-cancelpick]'))) { pickMode = null; render(); return; }
@@ -1056,9 +1167,13 @@ document.addEventListener('click', e => {
     if ((b = q('[data-sally]'))) { addOrder({ type: 'sally', county: sel }); return; }
     if ((b = q('[data-scoutpick]'))) { pickMode = { type: 'scout', from: sel }; uiMsg = ''; render(); return; }
     if ((b = q('[data-feintpick]'))) { pickMode = { type: 'feint' }; uiMsg = ''; render(); return; }
+    if ((b = q('[data-spypick]'))) { pickMode = { type: 'spy' }; uiMsg = ''; render(); return; }
   }
   if ((b = q('[data-dipopen]'))) { showDip(); return; }
-  if (t.id === 'closeDip') { hideModal(); return; }
+  if (t.id === 'closeDip' || t.id === 'closeDipX') { hideDip(); return; }
+  if ((b = q('[data-lf]'))) { setLogFilter(b.dataset.lf); return; }
+  if ((b = q('[data-coachskip]'))) { coachSkip = true; render(); return; }
+  if ((b = q('[data-scn]'))) { startScenario(b.dataset.scn); return; }
   if (t.id === 'closeHelp') { try { localStorage.setItem('botr_seen', '1'); } catch (er) { /* ignore */ } hideModal(); if (!S) openNewGame(); return; }
   if (t.id === 'again') { hideModal(); openNewGame(); return; }
   if (t.id === 'passGo') { passGo(); return; }
@@ -1070,6 +1185,12 @@ document.addEventListener('change', e => {
   if (t.dataset && t.dataset.dipamt !== undefined) { dipAmt = +t.value; showDip(); }
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && pickMode) { pickMode = null; render(); } });
+document.addEventListener('mouseover', e => {
+  const b = e.target.closest && e.target.closest('[data-dest]');
+  const np = b && sel != null ? { from: sel, to: +b.dataset.dest } : null;
+  if ((np && preview && np.to === preview.to && np.from === preview.from) || (!np && !preview)) return;
+  preview = np; renderMap();
+});
 $('#btnDip').onclick = () => showDip();
 $('#btnHelp').onclick = () => showModal(helpHtml(), 'wide');
 $('#btnNew').onclick = () => {
@@ -1113,7 +1234,7 @@ window.addEventListener('resize', () => { if (S && (window.innerWidth < 700) !==
       if (raw && raw.rec && raw.rec.setup) { const rec = raw.rec; G = { mode: 'async', setup: rec.setup, orders: {}, sealed: {}, idx: 0, rec }; S = NET.stateOf(rec); restored = true; }
     } else if (active === 'local') {
       const raw = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
-      if (raw && raw.v === 3 && raw.S && !raw.S.over) { G = { mode: raw.mode, setup: raw.setup, orders: raw.orders || {}, sealed: raw.sealed || {}, idx: raw.idx || 0 }; S = raw.S; restored = true; }
+      if (raw && raw.v === 4 && raw.S && !raw.S.over) { G = { mode: raw.mode, setup: raw.setup, orders: raw.orders || {}, sealed: raw.sealed || {}, idx: raw.idx || 0 }; S = raw.S; restored = true; }
     }
   } catch (e) { restored = false; G = null; S = null; }
   if (restored) {

@@ -91,13 +91,13 @@ async function unpack(code) {
 
 /* ---------------------------------------------------------------- game records (deterministic replay) */
 /** setup = { seed, players: [ {human:true,name} | {ai:{personality,level}} ], policy? } */
-function makeSetup(seed, players) {
-  return { v: 2, seed: seed >>> 0, players: players.map((p, i) => p.ai ? { ai: { personality: p.ai.personality, level: p.ai.level } } : { human: true, name: p.name === '' ? '' : String(p.name || ('Player ' + (i + 1))).slice(0, 24), policy: p.policy ? { prisoners: p.policy.prisoners, hero: p.policy.hero } : undefined }) };
+function makeSetup(seed, players, extra) {
+  return Object.assign({ v: 3, seed: seed >>> 0, players: players.map((p, i) => p.ai ? { ai: { personality: p.ai.personality, level: p.ai.level } } : { human: true, name: p.name === '' ? '' : String(p.name || ('Player ' + (i + 1))).slice(0, 24), policy: p.policy ? { prisoners: p.policy.prisoners, hero: p.policy.hero } : undefined, style: ['warlord', 'builder', 'schemer'].includes(p.style) ? p.style : 'builder' }) }, extra && extra.scn ? { scn: String(extra.scn), legacy: (extra.legacy || []).slice(0, 4) } : {});
 }
 function initState(setup, opts) {
   opts = opts || {};
-  const specs = setup.players.map(p => p.ai ? { ai: p.ai } : { human: true, autoChoose: !!opts.autoChoose });
-  const S = B.newGame(setup.seed, { players: specs });
+  const specs = setup.players.map(p => p.ai ? { ai: p.ai } : { human: true, autoChoose: !!opts.autoChoose, style: p.style });
+  const S = B.newGame(setup.seed, { players: specs, scenario: setup.scn, legacy: setup.legacy });
   setup.players.forEach((p, i) => { if (p.name) S.players[i].lord = p.name; if (p.policy) Object.assign(S.players[i].policy, p.policy); });
   return S;
 }
