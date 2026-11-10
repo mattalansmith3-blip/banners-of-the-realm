@@ -238,3 +238,43 @@ textarea.code{width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-
   .topbtns .btn{padding:4px 8px}
   .legend{font-size:11px}
 }
+
+/* ---- diplomacy */
+.ev.pact{border-left-color:#7a5aa8;background:rgba(122,90,168,.12)}
+.orderlist li.dip{border-left-color:#7a5aa8}
+.chip.rival[data-dipopen],.chip.warnchip{cursor:pointer}
+.chip.warnchip{background:#f6e2a8;border-color:#b5651d;animation:nudge 2s ease-in-out infinite}
+@keyframes nudge{0%,100%{box-shadow:none}50%{box-shadow:0 0 0 3px rgba(181,101,29,.35)}}
+.rl{font-size:13px}
+.badge{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:#b5301c;color:#fff;font-size:12px;text-align:center;line-height:18px}
+.modalbox.dip{max-width:760px}
+.dipme,.dipcard{display:flex;gap:10px;align-items:flex-start;background:rgba(255,255,255,.42);border:1px solid #a58845;border-radius:10px;padding:8px;margin:6px 0}
+.dipcard .grow,.dipme>div{flex:1;min-width:0}
+.dipface{width:56px;height:56px;border-radius:10px;border:2px solid var(--gold);object-fit:cover;flex:0 0 auto;background:#3a2616}
+.dipface.fallback{display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px}
+.dipcard.prop{border-color:#b5651d;background:rgba(246,226,168,.6)}
+.dipcard .row{display:flex;gap:8px;margin-top:6px}
+.dipcard .row .btn{width:auto}
+.answered{margin-top:6px}
+.bar{display:block;height:7px;background:rgba(0,0,0,.18);border-radius:4px;overflow:hidden;margin:3px 0}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,#a6302b,#c9a227,#4c7a3a)}
+.bar.sm{display:inline-block;width:70px;vertical-align:middle;margin-left:5px;height:6px}
+.dhead{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.dmeters{display:flex;flex-wrap:wrap;gap:2px 14px;font-size:12.5px;color:var(--ink2);margin:3px 0}
+.relchip{border-radius:10px;padding:0 8px;font-size:12px;background:#d8c88f;border:1px solid #a58845}
+.relchip.war{background:#f3c9b9;border-color:#a8452a}.relchip.alliance{background:#d9e6c3;border-color:#4c7a3a}.relchip.nap,.relchip.peace,.relchip.tribute{background:#dfe6f2;border-color:#6d95c4}
+.deal{font-size:13.5px;margin:3px 0;padding:3px 6px;background:rgba(255,255,255,.35);border-radius:6px}
+.dacts{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.dacts .btn{width:auto;padding:4px 9px;font-size:12.5px}
+.dacts .btn.good{border-color:#4c7a3a}.dacts .btn.warn{border-color:#b5651d}
+.dacts .btn:disabled{opacity:.45}
+.relmx td.rel{text-align:center;font-size:16px}.relmx td.self,.relmx td.dead{text-align:center;color:#8a7a52}
+.relmx td.rel.war{background:rgba(166,48,43,.2)}.relmx td.rel.alliance{background:rgba(76,122,58,.25)}.relmx td.rel.nap,.relmx td.rel.peace,.relmx td.rel.tribute{background:rgba(47,95,158,.15)}
+.small{font-size:12.5px}
+.evcrests{display:flex;align-items:center;gap:6px;font-size:22px;flex:0 0 auto}
+.evcrests .dipface{width:48px;height:48px}
+@media (max-width:700px){
+  .modalbox.dip{padding:12px 10px}.dipface{width:44px;height:44px}.dacts .btn{padding:6px 8px}
+  .dmeters{flex-direction:column}
+}
+.dipinfo{margin:6px 0}.dipinfo summary{cursor:pointer;color:var(--wood);font-weight:bold;font-size:13.5px}
