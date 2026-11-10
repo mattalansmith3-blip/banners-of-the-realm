@@ -7,10 +7,13 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="app">
 <header class="topbar">
   <div class="brand"><span class="crest">⚜</span><h1>Banners of the Realm</h1></div>
   <div class="season" id="seasonBadge"></div>
   <div class="topbtns">
+    <button class="btn small" id="btnLink" hidden title="Play-by-link codes">🔗 Link</button>
+    <button class="btn small" id="btnMute" aria-pressed="false" title="Mute">🔊</button>
     <button class="btn small" id="btnHelp">How to Play</button>
     <button class="btn small" id="btnNew">New Game</button>
   </div>
@@ -18,15 +21,17 @@
 <div class="resbar" id="resbar"></div>
 
 <main class="layout">
-  <section class="mapwrap">
+  <section class="mapwrap" id="mapwrap">
     <div class="maphead" id="maphead"></div>
-    <svg id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Map of the realm"></svg>
+    <div class="mapstage" id="mapstage">
+      <svg id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Map of the realm"></svg>
+      <svg id="anim" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+      <div class="zoombtns"><button class="btn tiny" id="zoomIn" aria-label="Zoom in">＋</button><button class="btn tiny" id="zoomOut" aria-label="Zoom out">－</button><button class="btn tiny" id="zoomReset" aria-label="Reset zoom">⌂</button><span class="muted" id="zoomlvl">100%</span></div>
+      <div id="cardlayer" class="cardlayer" aria-live="polite"></div>
+    </div>
     <div class="legend">
-      <span><i class="sw" style="background:#2f5f9e"></i> You (House Aldric)</span>
-      <span><i class="sw" style="background:#a6302b"></i> Rival (House Valmoor)</span>
-      <span><i class="sw" style="background:#cdbf86"></i> Unclaimed</span>
-      <span>🏰 Capital &amp; Royal Banner</span>
-      <span>Shield = army power · tap a county to act</span>
+      <span>Shield = army power · tap a county to act · drag/pinch to pan &amp; zoom</span>
+      <span>🌫 grey mist = fog of war</span><span>👁 scouted</span><span>🏰 castle · red ring = siege</span><span>⚜ capital</span>
     </div>
   </section>
   <aside class="side">
@@ -38,12 +43,15 @@
     </section>
   </aside>
 </main>
-
 <div class="sealbar" id="sealbar"></div>
+</div>
 
+<div class="pass" id="pass" hidden></div>
 <div class="modal" id="modal" hidden><div class="modalbox" id="modalbox"></div></div>
 
+<script src="art/manifest.js"></script>
 <script src="engine.js"></script>
+<script src="net.js"></script>
 <script src="ui.js"></script>
 </body>
 </html>

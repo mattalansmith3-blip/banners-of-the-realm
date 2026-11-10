@@ -1,4 +1,4 @@
-/* Banners of the Realm - game engine (pure logic, no DOM). Works in browser (global BOTR) and node (module.exports). */
+/* Banners of the Realm - game engine v2 (pure logic, no DOM). Browser global BOTR / node module. */
 (function (root) {
 'use strict';
 
@@ -11,23 +11,28 @@ const STANCE_INFO = {
 };
 const BEATS = { charge: 'flank', hold: 'charge', flank: 'hold' };
 const MAX_ORDERS = 5;
-const TURN_LIMIT = 80;          // seasons (20 years) before a "crown" decision
+const TURN_LIMIT = 100;         // seasons before a "crown" decision
 const STANCE_BONUS = 1.4;
 const COUNTER_BONUS = 0.5;
 const DECISIVE = 1.3;
-const BANNER_MULT = 1.5;        // banner (3 units) = 3 * 1.5 * base
+const BANNER_MULT = 1.5;
 const PRESSED_MULT = 0.85;
 const PEASANT_FOOD = 0.06;
 const HARVEST_K = 0.7;
 const TAX_BASE = 0.15;
+const FEINT_COST = 6;
 
 const UNITS = {
-  levy:    { name: 'Levy',        plural: 'Levies',       str: 1, cost: 8,  wage: 1, food: 1, pop: 3, icon: '🔱', infantry: true,  counters: [] },
-  archers: { name: 'Archers',     plural: 'Archers',      str: 2, cost: 20, wage: 1, food: 1, pop: 1, icon: '🏹', infantry: true,  counters: ['levy'] },
-  maa:     { name: 'Men-at-arms', plural: 'Men-at-arms',  str: 3, cost: 35, wage: 2, food: 2, pop: 1, icon: '🗡️', infantry: true,  counters: ['archers'] },
-  knights: { name: 'Knights',     plural: 'Knights',      str: 5, cost: 70, wage: 3, food: 3, pop: 1, icon: '🐴', infantry: false, counters: ['maa', 'levy'], capitalOnly: true }
+  levy:    { name: 'Levy',        plural: 'Levies',      str: 1,   cost: 8,  wage: 1, food: 1, pop: 3, icon: '🔱', infantry: true,  counters: [] },
+  archers: { name: 'Archers',     plural: 'Archers',     str: 2,   cost: 20, wage: 1, food: 1, pop: 1, icon: '🏹', infantry: true,  counters: ['levy'] },
+  maa:     { name: 'Men-at-arms', plural: 'Men-at-arms', str: 3,   cost: 35, wage: 2, food: 2, pop: 1, icon: '🗡️', infantry: true,  counters: ['archers'] },
+  knights: { name: 'Knights',     plural: 'Knights',     str: 5,   cost: 70, wage: 3, food: 3, pop: 1, icon: '🐴', infantry: false, counters: ['maa', 'levy'], capitalOnly: true },
+  scout:   { name: 'Scout',       plural: 'Scouts',      str: 0.5, cost: 14, wage: 1, food: 1, pop: 1, icon: '🔭', infantry: false, counters: [], nomerge: true },
+  engine:  { name: 'Siege engine',plural: 'Siege engines', str: 1, cost: 45, wage: 1, food: 2, pop: 2, icon: '🪵', infantry: false, counters: [], nomerge: true, needCastle: true },
+  hero:    { name: 'Hero',        plural: 'Heroes',      str: 2,   cost: 0,  wage: 2, food: 1, pop: 0, icon: '👑', infantry: false, counters: [], nomerge: true, norecruit: true }
 };
-const UNIT_TYPES = Object.keys(UNITS);
+const UNIT_TYPES = ['levy', 'archers', 'maa', 'knights', 'scout', 'engine'];
+const MERGE_TYPES = ['levy', 'archers', 'maa', 'knights'];
 
 const TAX = {
   low:    { name: 'Low',    mult: 0.5, happy: 5 },
@@ -35,22 +40,64 @@ const TAX = {
   high:   { name: 'High',   mult: 1.7, happy: -6 }
 };
 const TERRAIN = {
-  plains:    { name: 'Plains',    def: 0.0,  color: '#cdbf86' },
-  forest:    { name: 'Forest',    def: 0.1,  color: '#8fa56b' },
-  hills:     { name: 'Hills',     def: 0.2,  color: '#b8a477' },
-  marsh:     { name: 'Marsh',     def: 0.1,  color: '#8fa08a' },
-  mountains: { name: 'Mountains', def: 0.3,  color: '#a39a8c' }
+  plains:    { name: 'Plains',    def: 0.0, color: '#cdbf86' },
+  forest:    { name: 'Forest',    def: 0.1, color: '#8fa56b' },
+  hills:     { name: 'Hills',     def: 0.2, color: '#b8a477' },
+  marsh:     { name: 'Marsh',     def: 0.1, color: '#8fa08a' },
+  mountains: { name: 'Mountains', def: 0.3, color: '#a39a8c' }
+};
+const CASTLE = [
+  { name: 'No castle', cost: 0,   time: 0, def: 0,    pen: 1,    cap: 0 },
+  { name: 'Palisade',  cost: 40,  time: 1, def: 0.15, pen: 0.85, cap: 20 },
+  { name: 'Keep',      cost: 90,  time: 2, def: 0.30, pen: 0.60, cap: 40 },
+  { name: 'Fortress',  cost: 180, time: 3, def: 0.50, pen: 0.45, cap: 70 }
+];
+const TRAITS = {
+  feared:      { name: 'Feared',       icon: '😈', desc: 'Enemies facing this hero fight at −7% power.' },
+  tactician:   { name: 'Tactician',    icon: '🧠', desc: 'Winning stance bonus is +55% instead of +40%.' },
+  stalwart:    { name: 'Stalwart',     icon: '🛡️', desc: '+10% power when defending.' },
+  swift:       { name: 'Swift',        icon: '💨', desc: 'The stack ignores snow and harsh winter on marches.' },
+  siegemaster: { name: 'Siege Master', icon: '🏗️', desc: 'Storming castles: attacker penalty reduced a lot.' },
+  beloved:     { name: 'Beloved',      icon: '❤️', desc: '+2 mood a season in the county where the hero stays.' },
+  silver:      { name: 'Silver Tongue',icon: '💬', desc: 'Ransoms worth +50%.' }
+};
+const TRAIT_KEYS = Object.keys(TRAITS);
+const HERO_NAMES = ['Sir Edric the Bold', 'Lady Maren Ashford', 'Sir Godwin Redhand', 'Dame Isolde Fenn', 'Sir Cedric Oakheart', 'Lord Balthus Crane', 'Sir Alaric Stone', 'Lady Rowena Vale',
+  'Sir Tristan Marsh', 'Dame Elspeth Rook', 'Sir Hugh Blackthorn', 'Lady Brisa Wren', 'Sir Osric Dunmere', 'Sir Leofric Hale', 'Dame Matilda Gray', 'Sir Wystan Holt',
+  'Lord Percival Dane', 'Lady Aveline Rose', 'Sir Baldric Thorn', 'Dame Hild Ironwood', 'Sir Roland Fairwind', 'Lord Garrick Pyke', 'Lady Sibyl Moor', 'Sir Aldous Penn'];
+
+const PERSONALITIES = {
+  warlord: { name: 'Warlord', icon: '⚔️', blurb: 'Aggressive: hits early, hits hard, loves knights.',
+    ratioFoe: 1.15, ratioNeutral: 1.2, boldRate: 1.5, rivalValue: 1.5, neutralValue: 0.9, reserve: 0.9, build: 0.15, scout: 0.4, feint: 0.1, stormRatio: 1.1, restraint: 0, buildCap: false },
+  builder: { name: 'Builder', icon: '🏰', blurb: 'Turtle & economy: fortifies, farms, strikes only when overwhelming.',
+    ratioFoe: 1.7, ratioNeutral: 1.3, boldRate: 0.5, rivalValue: 0.6, neutralValue: 1.3, reserve: 1.3, build: 1.0, scout: 0.3, feint: 0, stormRatio: 1.6, restraint: 14, buildCap: true },
+  schemer: { name: 'Schemer', icon: '🎭', blurb: 'Feints, bides its time, then backstabs the weak.',
+    ratioFoe: 1.25, ratioNeutral: 1.25, boldRate: 1.0, rivalValue: 1.1, neutralValue: 1.0, reserve: 1.0, build: 0.3, scout: 1.0, feint: 1.0, stormRatio: 1.3, restraint: 8, buildCap: false }
+};
+const DIFFICULTY = {
+  easy:   { name: 'Easy',   maxOrders: 3, ratioAdd: 0.35, jitter: 0.5, mistake: 0.25, storm: false, smart: 0.3 },
+  normal: { name: 'Normal', maxOrders: 5, ratioAdd: 0.0,  jitter: 0.3, mistake: 0.05, storm: true,  smart: 0.7 },
+  hard:   { name: 'Hard',   maxOrders: 5, ratioAdd: -0.1, jitter: 0.15, mistake: 0,   storm: true,  smart: 1.0 }
 };
 
-/* ------------------------------------------------------------------ MAP */
-const MAP_DEF = [
-  { name: 'Highmere',   x: 100, y: 340, terrain: 'plains',    pop: 120, fert: 1.0, owner: 0, capital: 0, units: ['levy','levy','levy','archers','archers','maa'] },
+const PLAYER_DEF = [
+  { id: 0, name: 'House Aldric',    short: 'Aldric',    color: '#2f5f9e', light: '#7fa6d8' },
+  { id: 1, name: 'House Valmoor',   short: 'Valmoor',   color: '#a6302b', light: '#e08a82' },
+  { id: 2, name: 'House Thorne',    short: 'Thorne',    color: '#3c7a3a', light: '#8fc98a' },
+  { id: 3, name: 'House Ravenscar', short: 'Ravenscar', color: '#7a3c8a', light: '#c08ad0' },
+  { id: 4, name: 'House Stormvale', short: 'Stormvale', color: '#c9762a', light: '#efb67a' },
+  { id: 5, name: 'House Blackwood', short: 'Blackwood', color: '#2a7f84', light: '#7fcfd3' }
+];
+
+/* ------------------------------------------------------------------ MAPS */
+const SMALL_DEFS = [
+  { name: 'Highmere',   x: 100, y: 340, terrain: 'plains',    pop: 120, fert: 1.0, owner: 0, capital: 0, castle: 2, units: ['levy','levy','levy','archers','archers','maa'] },
   { name: 'Oakvale',    x: 205, y: 165, terrain: 'forest',    pop: 70,  fert: 0.8, owner: 0, units: ['levy','levy','archers'] },
   { name: 'Ravenfell',  x: 205, y: 525, terrain: 'plains',    pop: 80,  fert: 1.1, owner: 0, units: ['levy','levy','archers'] },
   { name: 'Thornwick',  x: 325, y: 345, terrain: 'plains',    pop: 70,  fert: 1.0, owner: -1, units: ['levy','levy'] },
   { name: 'Greywater',  x: 365, y: 130, terrain: 'hills',     pop: 70,  fert: 0.8, owner: -1, units: ['levy','archers'] },
   { name: 'Stonebridge',x: 355, y: 585, terrain: 'forest',    pop: 70,  fert: 0.8, owner: -1, units: ['levy','archers'] },
-  { name: 'Ashdown',    x: 500, y: 335, terrain: 'hills',     pop: 80,  fert: 0.9, owner: -1, units: ['maa','archers'] },
+  { name: 'Ashdown',    x: 500, y: 335, terrain: 'hills',     pop: 80,  fert: 0.9, owner: -1, castle: 1, units: ['maa','archers'] },
   { name: 'Greyfang Pass', x: 500, y: 185, terrain: 'mountains', pop: 40, fert: 0.4, owner: -1, units: ['archers','archers','levy'] },
   { name: 'Mistfen',    x: 500, y: 485, terrain: 'marsh',     pop: 60,  fert: 0.7, owner: -1, units: ['levy','levy','archers'] },
   { name: 'Marrowgate', x: 635, y: 130, terrain: 'hills',     pop: 70,  fert: 0.8, owner: -1, units: ['levy','archers'] },
@@ -58,76 +105,85 @@ const MAP_DEF = [
   { name: 'Dunmore',    x: 675, y: 345, terrain: 'plains',    pop: 70,  fert: 1.0, owner: -1, units: ['levy','levy'] },
   { name: 'Fenwick',    x: 795, y: 165, terrain: 'forest',    pop: 70,  fert: 0.8, owner: 1, units: ['levy','levy','archers'] },
   { name: 'Kingsford',  x: 795, y: 525, terrain: 'plains',    pop: 80,  fert: 1.1, owner: 1, units: ['levy','levy','archers'] },
-  { name: 'Ironhold',   x: 900, y: 340, terrain: 'plains',    pop: 120, fert: 1.0, owner: 1, capital: 1, units: ['levy','levy','levy','archers','archers','maa'] }
-];
-const PLAYER_DEF = [
-  { id: 0, name: 'House Aldric',  short: 'Aldric',  color: '#2f5f9e', light: '#7fa6d8' },
-  { id: 1, name: 'House Valmoor', short: 'Valmoor', color: '#a6302b', light: '#e08a82' }
+  { name: 'Ironhold',   x: 900, y: 340, terrain: 'plains',    pop: 120, fert: 1.0, owner: 1, capital: 1, castle: 2, units: ['levy','levy','levy','archers','archers','maa'] }
 ];
 
-function buildMap() {
-  const N = MAP_DEF.length;
+const LARGE_NAMES = {
+  cap: ['Highmere', 'Ironhold', 'Stormhaven', 'Ravenscar', 'Oakenkeep', 'Blackwater'],
+  sat: [['Oakvale', 'Ravenfell'], ['Fenwick', 'Kingsford'], ['Thornfield', 'Gullcrest'], ['Crowmere', 'Nightbloom'], ['Emberdown', 'Saltmarsh'], ['Pinewatch', 'Coldharbour']],
+  outer: ['Thornwick', 'Greywater', 'Stonebridge', 'Marrowgate', 'Wolfsmere', 'Dunmore'],
+  inner: ['Ashdown', 'Mistfen', 'Greyfang Pass', 'Hollowdeep']
+};
+function largeDefs() {
+  const defs = []; const cx = 500, cy = 350, rad = Math.PI / 180;
+  const pos = (ang, rf) => [Math.round(cx + rf * 480 * Math.cos(ang * rad)), Math.round(cy + rf * 330 * Math.sin(ang * rad))];
+  const slots = [];
+  for (let s = 0; s < 6; s++) {
+    const ang = 180 + 60 * s;
+    const cp = pos(ang, 0.84), sa = pos(ang - 17, 0.76), sb = pos(ang + 17, 0.76);
+    const ci = defs.length;
+    defs.push({ name: LARGE_NAMES.cap[s], x: cp[0], y: cp[1], terrain: 'plains', pop: 120, fert: 1.0, owner: -1, castle: 2, capSlot: s, role: 'cap', units: ['maa', 'maa', 'archers', 'archers', 'levy'] });
+    const a = defs.length; defs.push({ name: LARGE_NAMES.sat[s][0], x: sa[0], y: sa[1], terrain: 'forest', pop: 70, fert: 0.8, owner: -1, role: 'sat', slot: s, units: ['levy', 'levy', 'archers'] });
+    const b = defs.length; defs.push({ name: LARGE_NAMES.sat[s][1], x: sb[0], y: sb[1], terrain: 'plains', pop: 80, fert: 1.1, owner: -1, role: 'sat', slot: s, units: ['levy', 'levy', 'archers'] });
+    slots.push({ cap: ci, sats: [a, b] });
+  }
+  const outerT = ['plains', 'hills', 'forest', 'hills', 'forest', 'plains'];
+  for (let s = 0; s < 6; s++) {
+    const p = pos(180 + 60 * s + 30, 0.9);
+    defs.push({ name: LARGE_NAMES.outer[s], x: p[0], y: p[1], terrain: outerT[s], pop: 70, fert: 0.9, owner: -1, role: 'outer', units: s % 2 ? ['levy', 'archers'] : ['levy', 'levy', 'archers'] });
+  }
+  const innerT = ['hills', 'marsh', 'mountains', 'marsh'];
+  const innerA = [45, 135, 225, 315];
+  for (let k = 0; k < 4; k++) {
+    const p = pos(innerA[k], 0.38);
+    defs.push({ name: LARGE_NAMES.inner[k], x: p[0], y: p[1], terrain: innerT[k], pop: 60, fert: 0.6, owner: -1, role: 'inner', castle: k === 0 ? 1 : 0, units: ['maa', 'archers', 'archers'] });
+  }
+  defs.slots = slots;
+  return defs;
+}
+const SLOTS_BY_N = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] };
+
+function buildMap(id, defs) {
+  const N = defs.length;
   const hull = [];
   for (let i = 0; i < 32; i++) {
     const a = (i / 32) * Math.PI * 2;
     hull.push([500 + 492 * Math.cos(a), 350 + 338 * Math.sin(a)]);
   }
   function clip(poly, a, b) {
-    // keep points closer to a than b
     const g = (p) => (b[0] * b[0] + b[1] * b[1] - a[0] * a[0] - a[1] * a[1]) - 2 * (p[0] * (b[0] - a[0]) + p[1] * (b[1] - a[1]));
     const out = [];
     for (let i = 0; i < poly.length; i++) {
       const p = poly[i], q = poly[(i + 1) % poly.length];
       const gp = g(p), gq = g(q);
       if (gp >= 0) out.push(p);
-      if ((gp >= 0) !== (gq >= 0)) {
-        const t = gp / (gp - gq);
-        out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]);
-      }
+      if ((gp >= 0) !== (gq >= 0)) { const t = gp / (gp - gq); out.push([p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])]); }
     }
     return out;
   }
-  const seeds = MAP_DEF.map(d => [d.x, d.y]);
-  const cells = seeds.map((s, i) => {
-    let poly = hull.slice();
-    for (let j = 0; j < N; j++) if (j !== i) poly = clip(poly, s, seeds[j]);
-    return poly;
-  });
+  const seeds = defs.map(d => [d.x, d.y]);
+  const cells = seeds.map((s, i) => { let poly = hull.slice(); for (let j = 0; j < N; j++) if (j !== i) poly = clip(poly, s, seeds[j]); return poly; });
   const adj = Array.from({ length: N }, () => []);
-  for (let i = 0; i < N; i++) {
-    for (let j = i + 1; j < N; j++) {
-      const a = seeds[i], b = seeds[j];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const dist = (p) => Math.abs((b[0] * b[0] + b[1] * b[1] - a[0] * a[0] - a[1] * a[1]) - 2 * (p[0] * (b[0] - a[0]) + p[1] * (b[1] - a[1]))) / (2 * len);
-      const poly = cells[i];
-      let shared = 0;
-      for (let k = 0; k < poly.length; k++) {
-        const p = poly[k], q = poly[(k + 1) % poly.length];
-        if (dist(p) < 0.05 && dist(q) < 0.05) shared += Math.hypot(q[0] - p[0], q[1] - p[1]);
-      }
-      if (shared > 14) { adj[i].push(j); adj[j].push(i); }
-    }
+  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) {
+    const a = seeds[i], b = seeds[j];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const dist = (p) => Math.abs((b[0] * b[0] + b[1] * b[1] - a[0] * a[0] - a[1] * a[1]) - 2 * (p[0] * (b[0] - a[0]) + p[1] * (b[1] - a[1]))) / (2 * len);
+    const poly = cells[i]; let shared = 0;
+    for (let k = 0; k < poly.length; k++) { const p = poly[k], q = poly[(k + 1) % poly.length]; if (dist(p) < 0.05 && dist(q) < 0.05) shared += Math.hypot(q[0] - p[0], q[1] - p[1]); }
+    if (shared > 14) { adj[i].push(j); adj[j].push(i); }
   }
   const centroid = cells.map(poly => {
     let A = 0, cx = 0, cy = 0;
-    for (let k = 0; k < poly.length; k++) {
-      const p = poly[k], q = poly[(k + 1) % poly.length];
-      const cr = p[0] * q[1] - q[0] * p[1];
-      A += cr; cx += (p[0] + q[0]) * cr; cy += (p[1] + q[1]) * cr;
-    }
-    A /= 2;
-    return [cx / (6 * A), cy / (6 * A)];
+    for (let k = 0; k < poly.length; k++) { const p = poly[k], q = poly[(k + 1) % poly.length]; const cr = p[0] * q[1] - q[0] * p[1]; A += cr; cx += (p[0] + q[0]) * cr; cy += (p[1] + q[1]) * cr; }
+    A /= 2; return [cx / (6 * A), cy / (6 * A)];
   });
-  // all-pairs distance (BFS)
   const dist = Array.from({ length: N }, () => new Array(N).fill(99));
-  for (let s = 0; s < N; s++) {
-    dist[s][s] = 0; const q = [s];
-    while (q.length) { const c = q.shift(); for (const n of adj[c]) if (dist[s][n] === 99) { dist[s][n] = dist[s][c] + 1; q.push(n); } }
-  }
-  return { n: N, defs: MAP_DEF, cells, adj, centroid, dist };
+  for (let s = 0; s < N; s++) { dist[s][s] = 0; const q = [s]; while (q.length) { const c = q.shift(); for (const n of adj[c]) if (dist[s][n] === 99) { dist[s][n] = dist[s][c] + 1; q.push(n); } } }
+  return { id, n: N, defs, cells, adj, centroid, dist, slots: defs.slots || null };
 }
-const MAP = buildMap();
-MAP.capitals = [0, 1].map(p => MAP_DEF.findIndex(d => d.capital === p));
+const MAPS = { small: buildMap('small', SMALL_DEFS), large: buildMap('large', largeDefs()) };
+let MAP = MAPS.small, MAP_DEF = MAP.defs;
+function bind(S) { if (MAP.id !== S.mapId) { MAP = MAPS[S.mapId]; MAP_DEF = MAP.defs; BOTR.MAP = MAP; BOTR.MAP_DEF = MAP_DEF; } }
 
 /* ------------------------------------------------------------------ helpers */
 function rnd(S) {
@@ -143,6 +199,8 @@ function pickWeighted(S, items, weights) {
   for (let i = 0; i < items.length; i++) { r -= weights[i]; if (r <= 0) return items[i]; }
   return items[items.length - 1];
 }
+function shuffle(S, arr) { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd(S) * (i + 1)); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+function heroOfUnit(S, u) { return u.type === 'hero' ? S.heroes.find(h => h.id === u.hid) || null : null; }
 function ustr(u) { return UNITS[u.type].str * (u.banner ? 3 * BANNER_MULT : 1) * (u.pressed ? PRESSED_MULT : 1); }
 function ucost(u) { return UNITS[u.type].cost * (u.banner ? 3 : 1); }
 function uwage(u) { return UNITS[u.type].wage * (u.banner ? 2 : 1); }
@@ -151,10 +209,7 @@ function ulabel(u) { return u.banner ? 'Banner of ' + UNITS[u.type].plural : UNI
 function sumStr(arr) { let t = 0; for (const u of arr) t += ustr(u); return t; }
 function describeUnits(units) {
   const m = new Map();
-  for (const u of units) {
-    const k = u.banner ? 'B:' + u.type : u.type;
-    m.set(k, (m.get(k) || 0) + 1);
-  }
+  for (const u of units) { const k = u.banner ? 'B:' + u.type : u.type; m.set(k, (m.get(k) || 0) + 1); }
   const parts = [];
   for (const [k, n] of m) {
     if (k.startsWith('B:')) parts.push((n > 1 ? n + '× ' : '') + 'Banner of ' + UNITS[k.slice(2)].plural);
@@ -169,62 +224,158 @@ function pname(S, o) { return o < 0 ? 'the garrison' : S.players[o].short; }
 function hostileAt(S, cid, owner) { return S.units.some(u => u.county === cid && u.owner !== owner); }
 function counterOfStance(s) { return STANCES.find(x => BEATS[x] === s); }
 function terrainDef(cid) { return TERRAIN[MAP_DEF[cid].terrain].def; }
+function alivePlayers(S) { return S.players.filter(p => p.alive); }
+function isAI(p) { return !!p.ai; }
+function castleDef(S, cid) { return CASTLE[S.counties[cid].castle]; }
 
 /* ------------------------------------------------------------------ new game */
+/** opts.players = [{human:true,name?} | {ai:{personality,level}}] ; 2 players => small map, else large map. */
 function newGame(seed, opts) {
   opts = opts || {};
+  let specs = opts.players;
+  if (!specs) {
+    specs = [{ human: !!(opts.humans && opts.humans.includes(0)) }, { human: !!(opts.humans && opts.humans.includes(1)) }];
+    specs.forEach(s => { if (!s.human) s.ai = { personality: 'warlord', level: 'normal' }; });
+  }
+  const N = specs.length;
+  const mapId = N <= 2 ? 'small' : 'large';
+  const map = MAPS[mapId];
   const S = {
-    v: 1, seed: seed >>> 0, rng: (seed >>> 0) ^ 0x9E3779B9, turn: 0, season: 0, year: 1,
-    players: PLAYER_DEF.map(p => ({
-      id: p.id, name: p.name, short: p.short, color: p.color, light: p.light,
-      human: !!(opts.humans && opts.humans.includes(p.id)),
-      gold: 70, grain: 130, renown: 0, garrison: {}, lastEnemyStance: null,
-      capital: MAP.capitals[p.id]
-    })),
-    counties: [], units: [], nextId: 1, log: [], turnLog: [], over: null
+    v: 2, mapId, seed: seed >>> 0, rng: (seed >>> 0) ^ 0x9E3779B9, turn: 0, season: 0, year: 1,
+    players: [], counties: [], units: [], heroes: [], feints: [], mods: { harsh: false, harvest: {} },
+    nextId: 1, log: [], turnLog: [], over: null, settings: { n: N }
   };
-  MAP_DEF.forEach((d, i) => {
-    S.counties.push({ id: i, owner: d.owner, pop: d.pop, maxPop: Math.round(d.pop * 1.25), happiness: d.owner >= 0 ? 60 : 50, tax: 'normal', resent: 0, occ: null, unrest: false });
-    for (const t of d.units) S.units.push({ id: S.nextId++, type: t, owner: d.owner, county: i, banner: false, pressed: false });
+  bind(S);
+  let slots = (SLOTS_BY_N[N] || SLOTS_BY_N[6]).slice();
+  if (mapId === 'large') slots = shuffle(S, slots);   // starting corners are drawn by lot, so no seat is favoured
+  const ownerOfCounty = new Array(map.n).fill(-1), capOf = new Array(map.n).fill(null);
+  if (mapId === 'small') {
+    map.defs.forEach((d, i) => { ownerOfCounty[i] = d.owner; if (d.capital !== undefined) capOf[i] = d.capital; });
+  } else {
+    specs.forEach((sp, k) => { const sl = map.slots[slots[k]]; ownerOfCounty[sl.cap] = k; capOf[sl.cap] = k; for (const s of sl.sats) ownerOfCounty[s] = k; });
+  }
+  const capitals = new Array(N);
+  capOf.forEach((p, i) => { if (p != null) capitals[p] = i; });
+  specs.forEach((sp, k) => {
+    const pd = PLAYER_DEF[k];
+    const ai = sp.ai ? { personality: sp.ai.personality || 'warlord', level: sp.ai.level || 'normal' } : null;
+    S.players.push({
+      id: k, name: pd.name, short: pd.short, color: pd.color, light: pd.light,
+      human: !sp.ai, autoChoose: !!sp.autoChoose, ai, alive: true, policy: { prisoners: 'press', hero: 'ransom', merc: 'hire', heroOffer: 'accept' },
+      gold: 70, grain: 130, renown: 0, garrison: {}, lastEnemyStance: null, idle: 0, capital: capitals[k], scouted: {}, mem: {}, stats: { battles: 0, wins: 0 }
+    });
   });
+  map.defs.forEach((d, i) => {
+    const own = ownerOfCounty[i];
+    const castle = (d.castle || 0);
+    const c = { id: i, owner: own, pop: d.pop, maxPop: Math.round(d.pop * 1.25), happiness: own >= 0 ? 60 : 50, tax: 'normal', resent: 0, occ: null, unrest: false,
+      castle, build: null, stores: CASTLE[castle].cap, siege: null, sally: false, lowTurns: 0, cap: capOf[i] };
+    // large-map capitals of absent players keep a Palisade only
+    if (mapId === 'large' && d.role === 'cap' && own < 0) c.castle = 1, c.stores = CASTLE[1].cap;
+    S.counties.push(c);
+    let list = d.units;
+    if (own >= 0 && mapId === 'large') list = d.role === 'cap' ? ['levy', 'levy', 'levy', 'archers', 'archers', 'maa'] : d.units;
+    for (const t of list) S.units.push({ id: S.nextId++, type: t, owner: own, county: i, banner: false, pressed: false });
+  });
+  // starting heroes
+  const names = shuffle(S, HERO_NAMES.slice());
+  S.players.forEach((p, k) => addHero(S, k, p.capital, names[k % names.length]));
   return S;
+}
+function addHero(S, owner, county, name) {
+  const h = { id: S.nextId++, name: name || HERO_NAMES[Math.floor(rnd(S) * HERO_NAMES.length)], owner, traits: [], deeds: 0, captured: false };
+  S.heroes.push(h);
+  S.units.push({ id: S.nextId++, type: 'hero', hid: h.id, owner, county, banner: false, pressed: false });
+  return h;
+}
+
+/* ------------------------------------------------------------------ fog of war */
+function visSet(S, p) {
+  const pl = S.players[p], v = new Set();
+  if (!pl || !pl.alive) return v;
+  const base = new Set();
+  for (const c of S.counties) if (c.owner === p) base.add(c.id);
+  for (const u of S.units) if (u.owner === p) {
+    base.add(u.county);
+  }
+  for (const b of base) { v.add(b); for (const n of MAP.adj[b]) v.add(n); }
+  for (const k in pl.scouted) if (pl.scouted[k] >= S.turn) { v.add(+k); for (const n of MAP.adj[+k]) v.add(n); }
+  return v;
+}
+function fakeUnits(S, forPlayer) {
+  const out = [];
+  const vis = forPlayer == null ? null : visSet(S, forPlayer);
+  for (const f of S.feints) {
+    if (f.until !== S.turn || f.owner === forPlayer) continue;
+    if (vis && !vis.has(f.county)) continue;
+    const n = Math.max(2, Math.min(6, Math.round(f.power / 3)));
+    for (let k = 0; k < n; k++) out.push({ id: -(f.id * 10 + k), type: 'maa', owner: f.owner, county: f.county, banner: false, pressed: false, fake: true });
+  }
+  return out;
+}
+/** Units the given player can see (own + visible others + enemy feints). */
+function viewUnits(S, p) {
+  const vis = visSet(S, p);
+  const out = S.units.filter(u => u.owner === p || vis.has(u.county));
+  return out.concat(fakeUnits(S, p));
+}
+let VIS = null;
+function refreshVis(S) { VIS = S.players.map(p => visSet(S, p.id)); }
+function updateMemory(S) {
+  for (const p of S.players) {
+    if (!p.alive) continue;
+    const vis = visSet(S, p.id);
+    for (const c of vis) {
+      const us = S.units.filter(u => u.county === c && u.owner !== p.id);
+      if (us.length) p.mem[c] = { turn: S.turn, n: us.length, pow: Math.round(sumStr(us) * 10) / 10, owner: us[0].owner };
+      else delete p.mem[c];
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ orders */
-function newCtx() { return { used: new Set(), gold: 0, tax: new Set() }; }
+function newCtx() { return { used: new Set(), gold: 0, tax: new Set(), build: new Set(), storm: new Set(), feint: new Set() }; }
 function pickMerge(S, pid, cid, type, used) {
   const av = S.units.filter(u => u.owner === pid && u.county === cid && u.type === type && !u.banner && !u.pressed && !used.has(u.id));
   av.sort((a, b) => a.id - b.id);
   return av.length >= 3 ? av.slice(0, 3) : null;
 }
+function stormCandidates(S, pid, cid) {
+  const c = S.counties[cid];
+  return c.castle > 0 && c.owner >= 0 && c.owner !== pid && S.units.some(u => u.county === cid && u.owner === c.owner) && S.units.some(u => u.county === cid && u.owner === pid);
+}
 function checkOrder(S, pid, o, ctx) {
+  bind(S);
   const me = S.players[pid];
+  if (!me || !me.alive) return 'You have been eliminated.';
   if (!o || typeof o !== 'object') return 'Bad order';
   switch (o.type) {
     case 'march': {
       if (!Array.isArray(o.units) || !o.units.length) return 'Select at least one unit.';
       if (!STANCES.includes(o.stance)) return 'Choose a stance.';
       if (!(MAP.adj[o.from] || []).includes(o.to)) return 'You can only march to an adjacent county.';
-      const seen = new Set();
+      const seen = new Set(); let escort = false;
       for (const id of o.units) {
         const u = unitById(S, id);
         if (!u || u.owner !== pid || u.county !== o.from) return 'Unit is not in that county.';
         if (ctx.used.has(id) || seen.has(id)) return 'Unit already has an order.';
-        seen.add(id);
+        seen.add(id); if (u.type !== 'engine') escort = true;
       }
+      if (!escort) return 'Siege engines need an escort.';
       return null;
     }
     case 'recruit': {
-      const d = UNITS[o.unit]; if (!d) return 'Unknown unit.';
+      const d = UNITS[o.unit]; if (!d || d.norecruit) return 'Unknown unit.';
       const c = S.counties[o.county]; if (!c || c.owner !== pid) return 'You can only recruit in your own counties.';
       if (d.capitalOnly && o.county !== me.capital) return d.name + ' can only be raised in your capital.';
+      if (d.needCastle && c.castle < 1) return d.name + ' need a castle in the county.';
       if (hostileAt(S, o.county, pid)) return 'Enemy troops occupy that county.';
       if (me.gold - ctx.gold < d.cost) return 'Not enough gold.';
       if (c.pop < d.pop + 10) return 'Too few peasants.';
       return null;
     }
     case 'merge': {
-      if (!UNITS[o.unit]) return 'Unknown unit.';
+      if (!MERGE_TYPES.includes(o.unit)) return 'That unit cannot merge.';
       const c = S.counties[o.county]; if (!c || c.owner !== pid) return 'Merge in your own county.';
       if (!pickMerge(S, pid, o.county, o.unit, ctx.used)) return 'Need 3 free identical units.';
       return null;
@@ -235,6 +386,42 @@ function checkOrder(S, pid, o, ctx) {
       if (ctx.tax.has(o.county)) return 'Already a tax order for that county.';
       return null;
     }
+    case 'scout': {
+      const t = o.target; if (t == null || t < 0 || t >= MAP.n) return 'Bad scouting target.';
+      if (!S.units.some(u => u.owner === pid && u.county === o.from && u.type === 'scout' && !ctx.used.has(u.id))) return 'No free scout in that county.';
+      if (MAP.dist[o.from][t] > 3) return 'Scouts can only look three counties away.';
+      return null;
+    }
+    case 'feint': {
+      const t = o.to; if (t == null || t < 0 || t >= MAP.n) return 'Bad feint target.';
+      const reach = MAP.adj[t].some(n => S.counties[n].owner === pid || S.units.some(u => u.owner === pid && u.county === n));
+      if (!reach && S.counties[t].owner !== pid) return 'A feint must come from land or troops next to the target.';
+      if (ctx.feint.has(t)) return 'Already feinting there.';
+      if (me.gold - ctx.gold < FEINT_COST) return 'Not enough gold.';
+      return null;
+    }
+    case 'build': {
+      const c = S.counties[o.county]; if (!c || c.owner !== pid) return 'Build in your own county.';
+      if (c.castle >= 3) return 'Already a Fortress.';
+      if (c.build) return 'Already under construction.';
+      if (ctx.build.has(o.county)) return 'Already building there.';
+      if (hostileAt(S, o.county, pid)) return 'Enemy troops occupy that county.';
+      const cost = CASTLE[c.castle + 1].cost;
+      if (me.gold - ctx.gold < cost) return 'Not enough gold (' + cost + ').';
+      return null;
+    }
+    case 'sally': {
+      const c = S.counties[o.county]; if (!c || c.owner !== pid) return 'Sally from your own castle.';
+      if (c.castle < 1) return 'Only a castle garrison can sally.';
+      if (!S.units.some(u => u.county === o.county && u.owner === pid && u.type !== 'hero' && u.type !== 'scout')) return 'No garrison to sally.';
+      if (ctx.sally && ctx.sally.has(o.county)) return 'Already sallying there.';
+      return null;
+    }
+    case 'storm': {
+      if (!stormCandidates(S, pid, o.county)) return 'No besieged castle to storm here.';
+      if (ctx.storm.has(o.county)) return 'Already storming there.';
+      return null;
+    }
   }
   return 'Unknown order.';
 }
@@ -243,21 +430,25 @@ function commitOrder(S, pid, o, ctx) {
   else if (o.type === 'recruit') ctx.gold += UNITS[o.unit].cost;
   else if (o.type === 'merge') for (const u of pickMerge(S, pid, o.county, o.unit, ctx.used)) ctx.used.add(u.id);
   else if (o.type === 'tax') ctx.tax.add(o.county);
+  else if (o.type === 'scout') { const u = S.units.find(x => x.owner === pid && x.county === o.from && x.type === 'scout' && !ctx.used.has(x.id)); ctx.used.add(u.id); }
+  else if (o.type === 'feint') { ctx.gold += FEINT_COST; ctx.feint.add(o.to); }
+  else if (o.type === 'build') { ctx.gold += CASTLE[S.counties[o.county].castle + 1].cost; ctx.build.add(o.county); }
+  else if (o.type === 'storm') ctx.storm.add(o.county);
+  else if (o.type === 'sally') (ctx.sally = ctx.sally || new Set()).add(o.county);
 }
 function ctxFromOrders(S, pid, orders) {
   const ctx = newCtx();
   for (const o of orders) { if (!checkOrder(S, pid, o, ctx)) commitOrder(S, pid, o, ctx); }
   return ctx;
 }
-/** Check a candidate order against the already-queued list. Returns error string or null. */
 function checkNewOrder(S, pid, o, orders) {
   if (orders.length >= MAX_ORDERS) return 'You have already given ' + MAX_ORDERS + ' orders.';
   return checkOrder(S, pid, o, ctxFromOrders(S, pid, orders));
 }
-function sanitizeOrders(S, pid, orders) {
+function sanitizeOrders(S, pid, orders, max) {
   const ctx = newCtx(), out = [];
   for (const o of orders || []) {
-    if (out.length >= MAX_ORDERS) break;
+    if (out.length >= (max || MAX_ORDERS)) break;
     if (!checkOrder(S, pid, o, ctx)) { commitOrder(S, pid, o, ctx); out.push(o); }
   }
   return out;
@@ -269,21 +460,27 @@ function validateOrders(S, pid, orders) {
   return { ok: !errors.length, errors };
 }
 function describeOrder(S, o) {
-  const cn = i => MAP_DEF[i].name;
+  bind(S);
   switch (o.type) {
     case 'march': {
       const us = o.units.map(id => unitById(S, id)).filter(Boolean);
-      return `March ${describeUnits(us)} ${cn(o.from)} → ${cn(o.to)} (${STANCE_INFO[o.stance].icon} ${STANCE_INFO[o.stance].name})`;
+      return `March ${describeUnits(us)} ${cname(o.from)} → ${cname(o.to)} (${STANCE_INFO[o.stance].icon} ${STANCE_INFO[o.stance].name}${o.storm ? ', storm!' : ''})`;
     }
-    case 'recruit': return `Recruit ${UNITS[o.unit].name} in ${cn(o.county)} (${UNITS[o.unit].cost}g)`;
-    case 'merge': return `Merge 3 ${UNITS[o.unit].plural} into a Banner in ${cn(o.county)}`;
-    case 'tax': return `Set tax in ${cn(o.county)} to ${TAX[o.rate].name}`;
+    case 'recruit': return `Recruit ${UNITS[o.unit].name} in ${cname(o.county)} (${UNITS[o.unit].cost}g)`;
+    case 'merge': return `Merge 3 ${UNITS[o.unit].plural} into a Banner in ${cname(o.county)}`;
+    case 'tax': return `Set tax in ${cname(o.county)} to ${TAX[o.rate].name}`;
+    case 'scout': return `Scout ${cname(o.target)} from ${cname(o.from)}`;
+    case 'feint': return `Feint toward ${cname(o.to)} (${FEINT_COST}g)`;
+    case 'build': return `Build ${CASTLE[S.counties[o.county].castle + 1].name} in ${cname(o.county)} (${CASTLE[S.counties[o.county].castle + 1].cost}g)`;
+    case 'storm': return `Storm the walls of ${cname(o.county)}`;
+    case 'sally': return `Garrison of ${cname(o.county)} sallies out against any besiegers`;
   }
   return '?';
 }
 
 /* ------------------------------------------------------------------ economy previews */
-function occupied(S, cid, pid) { return hostileAt(S, cid, pid) && !S.units.some(u => u.county === cid && u.owner === pid); }
+function besieged(S, cid) { const c = S.counties[cid]; return !!c.siege && c.owner >= 0; }
+function occupied(S, cid, pid) { return (hostileAt(S, cid, pid) && !S.units.some(u => u.county === cid && u.owner === pid)) || besieged(S, cid); }
 function countyIncome(S, c) {
   if (c.owner < 0 || c.happiness < 20 || occupied(S, c.id, c.owner)) return 0;
   return Math.round(c.pop * TAX_BASE * TAX[c.tax].mult);
@@ -292,16 +489,17 @@ function wagesFor(S, pid) { let t = 0; for (const u of S.units) if (u.owner === 
 function incomeFor(S, pid) { let t = 0; for (const c of S.counties) if (c.owner === pid) t += countyIncome(S, c); return t; }
 function harvestFor(S, pid) {
   if (S.season !== 2) return 0;
+  const m = (S.mods.harvest && S.mods.harvest[pid]) || 1;
   let t = 0;
-  for (const c of S.counties) if (c.owner === pid && !occupied(S, c.id, pid)) t += Math.round(c.pop * MAP_DEF[c.id].fert * HARVEST_K * (c.happiness >= 20 ? 1 : 0.6));
+  for (const c of S.counties) if (c.owner === pid && !occupied(S, c.id, pid)) t += Math.round(c.pop * MAP_DEF[c.id].fert * HARVEST_K * (c.happiness >= 20 ? 1 : 0.6) * m);
   return t;
 }
+function winterMult(S, season) { const s = season === undefined ? S.season : season; return s === 3 ? (S.mods.harsh ? 2.5 : 2) : 1; }
 function foodNeedFor(S, pid, season) {
-  const mult = (season === undefined ? S.season : season) === 3 ? 2 : 1;
   let n = 0;
-  for (const u of S.units) if (u.owner === pid) n += ufood(u);
+  for (const u of S.units) if (u.owner === pid && !(S.counties[u.county].siege && S.counties[u.county].owner === pid)) n += ufood(u);
   for (const c of S.counties) if (c.owner === pid) n += Math.round(c.pop * PEASANT_FOOD);
-  return n * mult;
+  return n * winterMult(S, season);
 }
 function yearlyBalance(S, pid) {
   let h = 0;
@@ -311,7 +509,13 @@ function yearlyBalance(S, pid) {
 function countiesOf(S, pid) { return S.counties.filter(c => c.owner === pid); }
 function armyStrength(S, pid) { return sumStr(S.units.filter(u => u.owner === pid)); }
 
-/* ------------------------------------------------------------------ resolution */
+/* ------------------------------------------------------------------ battle maths */
+function bestHero(S, side) {
+  let best = null;
+  for (const u of side.units) if (u.type === 'hero') { const h = heroOfUnit(S, u); if (h && (!best || h.deeds > best.deeds)) best = h; }
+  return best;
+}
+function anyTrait(S, side, t) { return side.units.some(u => { const h = u.type === 'hero' ? heroOfUnit(S, u) : null; return h && h.traits.includes(t); }); }
 function sideStrength(side, foe, ctx) {
   const foeTotal = sumStr(foe.units) || 1;
   let total = 0;
@@ -322,18 +526,19 @@ function sideStrength(side, foe, ctx) {
     let frac = 0;
     for (const e of foe.units) if (counters.includes(e.type)) frac += ustr(e) / foeTotal;
     s *= 1 + COUNTER_BONUS * Math.min(1, frac);
-    if (u.type === 'archers' && side.defending && ctx.castle) s *= 1.25;
+    if (u.type === 'archers' && side.defending && ctx.castleLvl > 0) s *= 1.25;
     total += s;
   }
   if (side.defending) total *= 1 + ctx.defBonus;
   return total;
 }
-function dominantStance(S, units, cid, defending) {
-  const sums = { charge: 0, hold: 0, flank: 0 };
-  for (const u of units) sums[unitStance(S, u, cid)] += ustr(u);
-  let best = null;
-  for (const s of STANCES) if (best === null || sums[s] > sums[best]) best = s;
-  return best;
+function heroMult(S, side, foe) {
+  let m = 1;
+  const h = bestHero(S, side);
+  if (h) m *= 1.08 + Math.min(0.1, h.deeds * 0.01);
+  if (side.defending && anyTrait(S, side, 'stalwart')) m *= 1.1;
+  if (anyTrait(S, foe, 'feared')) m *= 0.93;
+  return m;
 }
 function unitStance(S, u, cid) {
   if (u.moved && u.stance) return u.stance;
@@ -341,69 +546,449 @@ function unitStance(S, u, cid) {
   const g = S.players[u.owner].garrison[cid];
   return STANCES.includes(g) ? g : 'hold';
 }
+function dominantStance(S, units, cid) {
+  const sums = { charge: 0, hold: 0, flank: 0 };
+  for (const u of units) sums[unitStance(S, u, cid)] += ustr(u) + 0.01;
+  let best = null;
+  for (const s of STANCES) if (best === null || sums[s] > sums[best]) best = s;
+  return best;
+}
 function removeUnits(S, units) { const set = new Set(units); S.units = S.units.filter(u => !set.has(u)); }
 function safeFor(S, cid, owner) { return !S.units.some(u => u.county === cid && u.owner !== owner); }
 function homeFor(S, owner) {
   if (owner < 0) return null;
   const cap = S.players[owner].capital;
-  return safeFor(S, cap, owner) ? cap : null;
+  if (safeFor(S, cap, owner) && S.counties[cap].owner === owner) return cap;
+  const alt = S.counties.filter(c => c.owner === owner && safeFor(S, c.id, owner));
+  return alt.length ? alt[0].id : null;
+}
+function stormPenalty(S, cid, att) {
+  const L = S.counties[cid].castle; let M = CASTLE[L].pen;
+  const E = att.units.filter(u => u.type === 'engine').length;
+  if (L >= 2) M *= E > 0 ? Math.min(1.2, 0.75 + 0.1 * Math.min(E, 3)) : 0.4;
+  else if (E > 0) M = Math.min(1, M + 0.1);
+  if (anyTrait(S, att, 'siegemaster')) M = Math.min(1, M * 1.25 + 0.05);
+  return M;
 }
 
-function* resolveTurn(S, ordersByPlayer) {
-  S.turnLog = [];
-  const E = (text, kind, county, extra) => {
-    const ev = { text, kind: kind || 'info', county: county == null ? null : county, season: S.season, year: S.year };
-    if (extra) Object.assign(ev, extra);
-    S.log.push(ev); S.turnLog.push(ev); return ev;
+/* ------------------------------------------------------------------ choices */
+function autoChoice(S, info) {
+  const pl = S.players[info.player];
+  if (pl.human) { const pol = pl.policy && pl.policy[info.ctype]; if (info.options.includes(pol)) return pol; }
+  const pers = pl.ai ? pl.ai.personality : 'warlord';
+  switch (info.ctype) {
+    case 'prisoners':
+      if (pl.gold < 45 || pl.grain < 40) return 'ransom';
+      if (info.loser < 0) return 'press';
+      if (pers === 'builder') return rnd(S) < 0.5 ? 'ransom' : 'press';
+      return rnd(S) < 0.12 ? 'release' : 'press';
+    case 'hero': return (pl.gold < 260 || rnd(S) < 0.7) ? 'ransom' : 'release';
+    case 'merc': return pl.gold >= info.price + 45 && (pers !== 'builder' || rnd(S) < 0.5) ? 'hire' : 'decline';
+    case 'heroOffer': return S.heroes.filter(h => h.owner === info.player).length < 3 ? 'accept' : 'decline';
+  }
+  return info.options[0];
+}
+function* choose(S, info) {
+  const pl = S.players[info.player];
+  if (pl.human && !pl.autoChoose) {
+    const ans = yield info;
+    return info.options.includes(ans) ? ans : autoChoice(S, info);
+  }
+  return autoChoice(S, info);
+}
+function returnHero(S, E, unit, owner, why) {
+  const home = homeFor(S, owner);
+  const h = heroOfUnit(S, unit);
+  if (home == null) { S.heroes = S.heroes.filter(x => x !== h); E(`${h ? h.name : 'A hero'} has nowhere to return and vanishes into legend.`, 'hero', null, { who: [owner] }); return; }
+  unit.owner = owner; unit.county = home; unit.pressed = false; unit.moved = false; unit.storm = false; S.units.push(unit);
+  if (h) { h.owner = owner; h.captured = false; }
+}
+function heroGain(S, E, h, prefer) {
+  h.deeds++;
+  if (![2, 4, 7].includes(h.deeds)) return;
+  const have = new Set(h.traits);
+  let pool = prefer.filter(t => !have.has(t));
+  if (!pool.length) pool = TRAIT_KEYS.filter(t => !have.has(t));
+  if (!pool.length) return;
+  const t = pool[Math.floor(rnd(S) * pool.length)];
+  h.traits.push(t);
+  E(`⭐ ${h.name} earns a trait: ${TRAITS[t].icon} ${TRAITS[t].name}!`, 'hero', null, { who: [h.owner], card: { icon: TRAITS[t].icon, title: h.name + ': ' + TRAITS[t].name, key: 'hero_' + t, text: TRAITS[t].desc, hero: h.name } });
+}
+function applyChoice(S, E, info, choice, winner, loserOwner, units, landing) {
+  const wn = S.players[winner].short;
+  const sendHome = () => {
+    const home = homeFor(S, loserOwner);
+    if (home != null) for (const u of units) { u.owner = loserOwner; u.county = home; u.pressed = false; u.moved = false; u.storm = false; S.units.push(u); }
+    return home;
   };
-  const cname = i => MAP_DEF[i].name;
-  const orders = [0, 1].map(p => sanitizeOrders(S, p, ordersByPlayer[p] || []));
+  const wh = S.heroes.filter(h => h.owner === winner);
+  if (info.ctype === 'hero') {
+    const hu = units[0], h = heroOfUnit(S, hu);
+    if (choice === 'ransom') {
+      S.players[winner].gold += info.value;
+      if (loserOwner >= 0) S.players[loserOwner].gold = Math.max(0, S.players[loserOwner].gold - info.value);
+      E(`${wn} ransoms ${h.name} for ${info.value} gold. The hero returns home.`, 'hero', landing, { who: [winner, loserOwner] });
+    } else {
+      S.players[winner].renown++;
+      for (const c of S.counties) if (c.owner === winner) c.happiness = Math.min(100, c.happiness + 3);
+      E(`${wn} releases ${h.name} with honor (+3 mood). The hero returns home.`, 'hero', landing, { who: [winner, loserOwner] });
+    }
+    if (loserOwner >= 0) returnHero(S, E, hu, loserOwner); else S.heroes = S.heroes.filter(x => x !== h);
+    return;
+  }
+  if (choice === 'press') {
+    for (const u of units) { u.owner = winner; u.county = landing; u.pressed = true; u.moved = false; u.storm = false; u.rebel = false; u.raider = false; S.units.push(u); }
+    E(`${wn} presses ${describeUnits(units)} into service (they fight at ${Math.round(PRESSED_MULT * 100)}% and may desert if beaten).`, 'capture', landing, { who: [winner], cs: [landing] });
+  } else if (choice === 'ransom') {
+    S.players[winner].gold += info.value;
+    if (loserOwner >= 0) S.players[loserOwner].gold = Math.max(0, S.players[loserOwner].gold - info.value);
+    const home = sendHome();
+    E(`${wn} ransoms the prisoners for ${info.value} gold${loserOwner >= 0 ? (home != null ? '; they march home to ' + cname(home) : '; their home is occupied, so they disband') : ''}.`, 'econ', landing, { who: [winner, loserOwner] });
+  } else {
+    S.players[winner].renown++;
+    for (const c of S.counties) if (c.owner === winner) c.happiness = Math.min(100, c.happiness + 3);
+    for (const h of wh) { if (h.traits.length < 3 && rnd(S) < 0.15) heroGain(S, E, h, ['beloved']); }
+    const home = sendHome();
+    E(`${wn} releases the prisoners. Word of this mercy spreads: +3 mood across ${wn}'s realm${loserOwner >= 0 && home == null ? '; the freed men disband' : ''}.`, 'info', landing, { who: [winner, loserOwner] });
+  }
+}
+
+/* process captured units from a decisive victory: yields choices for humans */
+function* processCaptives(S, E, winner, loserOwner, captured, land, hint, label) {
+  const heroes = captured.filter(u => u.type === 'hero'), rest = captured.filter(u => u.type !== 'hero');
+  if (rest.length) {
+    const silver = S.units.some(u => u.owner === winner && u.type === 'hero' && (heroOfUnit(S, u) || { traits: [] }).traits.includes('silver'));
+    const value = Math.round(rest.reduce((t, u) => t + ucost(u), 0) * 0.6 * (silver ? 1.5 : 1));
+    const info = { kind: 'choice', ctype: 'prisoners', options: ['ransom', 'press', 'release'], player: winner, county: land, loser: loserOwner, count: rest.length, desc: describeUnits(rest), value,
+      text: `${pname(S, winner)} captures ${describeUnits(rest)}! Ransom, press into service, or release?` };
+    E(info.text, 'capture', hint, { who: [winner, loserOwner], cs: [hint] });
+    const ch = yield* choose(S, info);
+    applyChoice(S, E, info, ch, winner, loserOwner, rest, land);
+    yield S.turnLog[S.turnLog.length - 1];
+  }
+  for (const hu of heroes) {
+    const h = heroOfUnit(S, hu);
+    if (!h) continue;
+    h.captured = true;
+    const silver = S.units.some(u => u.owner === winner && u.type === 'hero' && (heroOfUnit(S, u) || { traits: [] }).traits.includes('silver'));
+    const value = Math.round((70 + h.deeds * 25 + h.traits.length * 20) * (silver ? 1.5 : 1));
+    const info = { kind: 'choice', ctype: 'hero', options: ['ransom', 'release'], player: winner, county: land, loser: loserOwner, hero: { name: h.name, traits: h.traits.slice(), deeds: h.deeds }, value,
+      text: `${pname(S, winner)} has captured the hero ${h.name}! Ransom (${value}g) or release?` };
+    E(info.text, 'hero', hint, { who: [winner, loserOwner], cs: [hint] });
+    const ch = yield* choose(S, info);
+    applyChoice(S, E, info, ch, winner, loserOwner, [hu], land);
+    yield S.turnLog[S.turnLog.length - 1];
+  }
+}
+
+/* ------------------------------------------------------------------ duels */
+function* fightCounty(S, E, cid, sides, opts) {
+  sides.sort((x, y) => (Number(y.defending) - Number(x.defending)) || (x.owner - y.owner));
+  let champ = sides[0];
+  for (let i = 1; i < sides.length; i++) {
+    const r = yield* duel(S, E, cid, champ, sides[i], opts);
+    champ = r.winner;
+  }
+  return { winner: champ };
+}
+
+function* duel(S, E, cid, a, b, opts) {
+  const field = opts.field;
+  const c = cid != null ? S.counties[cid] : null;
+  const lvl = (!field && c && !opts.noCastle) ? c.castle : 0;
+  const ctx = { castleLvl: lvl, defBonus: (!field && cid != null) ? terrainDef(cid) + CASTLE[lvl].def : 0 };
+  let ta = sideStrength(a, b, ctx) * (a.mult || 1) * heroMult(S, a, b);
+  let tb = sideStrength(b, a, ctx) * (b.mult || 1) * heroMult(S, b, a);
+  const aw = BEATS[a.stance] === b.stance, bw = BEATS[b.stance] === a.stance;
+  const ha = bestHero(S, a), hb = bestHero(S, b);
+  if (aw) ta *= (ha && ha.traits.includes('tactician')) ? 1.55 : STANCE_BONUS;
+  if (bw) tb *= (hb && hb.traits.includes('tactician')) ? 1.55 : STANCE_BONUS;
+  let winner, loser, wt, lt;
+  if (ta > tb) { winner = a; loser = b; wt = ta; lt = tb; }
+  else if (tb > ta) { winner = b; loser = a; wt = tb; lt = ta; }
+  else if (a.defending !== b.defending) { winner = a.defending ? a : b; loser = winner === a ? b : a; wt = lt = ta; }
+  else if (rnd(S) < 0.5) { winner = a; loser = b; wt = ta; lt = tb; } else { winner = b; loser = a; wt = tb; lt = ta; }
+  const ratio = lt > 0 ? wt / lt : 99;
+  const decisive = field || (winner.owner >= 0 && ratio >= DECISIVE);
+  for (const s of [a, b]) if (s.owner >= 0) S.players[s.owner].stats.battles++;
+  if (winner.owner >= 0) S.players[winner.owner].stats.wins++;
+  if (a.owner >= 0 && b.owner >= 0) { S.players[a.owner].lastEnemyStance = b.stance; S.players[b.owner].lastEnemyStance = a.stance; }
+  const sn = s => STANCE_INFO[s].icon + ' ' + STANCE_INFO[s].name;
+  const stanceNote = aw ? `${sn(a.stance)} beats ${sn(b.stance)}` : bw ? `${sn(b.stance)} beats ${sn(a.stance)}` : `both ${sn(a.stance)}`;
+  const side = (s, t) => `${pname(S, s.owner)} [${describeUnits(s.units)}; ${sn(s.stance)}${s.defending && !field ? ', defending' : ''}; power ${t.toFixed(1)}]`;
+  const outcome = decisive ? `${pname(S, winner.owner)} wins decisively.` : `${pname(S, winner.owner)} prevails; the beaten force is routed.`;
+  const who = [a.owner, b.owner].filter(o => o >= 0);
+  yield E(`⚔ Clash ${opts.label}: ${side(a, ta)} vs ${side(b, tb)}. ${stanceNote}. ${outcome}`, 'battle', opts.hint,
+    { who, cs: [opts.hint], battle: { cid: cid, a: { owner: a.owner, stance: a.stance, power: ta, units: describeUnits(a.units) }, b: { owner: b.owner, stance: b.stance, power: tb, units: describeUnits(b.units) }, winner: winner.owner, decisive, label: opts.label, note: stanceNote, outcome, ratio, storm: !!opts.storm } });
+
+  // hero deeds for winner
+  if (winner.owner >= 0) for (const u of winner.units) if (u.type === 'hero' && S.units.includes(u)) {
+    const h = heroOfUnit(S, u); if (!h) continue;
+    const prefer = opts.storm ? ['siegemaster'] : winner.defending ? ['stalwart', 'tactician'] : decisive ? ['feared', 'tactician', 'swift'] : ['swift', 'tactician'];
+    heroGain(S, E, h, prefer);
+  }
+
+  const lus = loser.units.filter(u => S.units.includes(u));
+  let captured = [];
+  const desert = lus.filter(u => u.pressed);
+  if (desert.length) {
+    removeUnits(S, desert);
+    yield E(`${desert.length} pressed soldier(s) of ${pname(S, loser.owner)} throw down their arms and desert.`, 'info', opts.hint, { who });
+  }
+  const rest = lus.filter(u => !u.pressed);
+  if (decisive) { removeUnits(S, rest); captured = rest; }
+  else {
+    const cut = []; const dest = new Map();
+    for (const u of rest) {
+      let t = null;
+      if (u.owner >= 0) {
+        if (u.moved && u.from != null && u.from !== cid && safeFor(S, u.from, u.owner)) t = u.from;
+        else {
+          const o2 = (MAP.adj[cid] || []).filter(n => S.counties[n].owner === u.owner && safeFor(S, n, u.owner));
+          o2.sort((x, y) => MAP.dist[x][S.players[u.owner].capital] - MAP.dist[y][S.players[u.owner].capital]);
+          if (o2.length) t = o2[0];
+        }
+      }
+      if (t == null) cut.push(u); else { u.county = t; u.moved = false; u.storm = false; dest.set(t, (dest.get(t) || 0) + 1); }
+    }
+    if (dest.size) yield E(`${pname(S, loser.owner)}'s routed troops fall back to ${[...dest.keys()].map(cname).join(', ')}.`, 'move', opts.hint, { who });
+    if (loser.owner < 0 && rest.length) { removeUnits(S, rest); yield E('The rabble scatters.', 'info', opts.hint, { who }); }
+    else if (cut.length) {
+      if (winner.owner >= 0) { removeUnits(S, cut); captured = cut; }
+      else {
+        const home = homeFor(S, loser.owner);
+        if (home != null) for (const u of cut) { u.county = home; u.moved = false; } else removeUnits(S, cut);
+      }
+    }
+  }
+  if (captured.length && winner.owner >= 0) {
+    const land = field ? opts.landing[winner.owner] : cid;
+    yield* processCaptives(S, E, winner.owner, loser.owner, captured, land, opts.hint, opts.label);
+  } else if (captured.length) {
+    removeUnits(S, captured);
+  }
+  return { winner, loser, decisive };
+}
+
+/* ------------------------------------------------------------------ events */
+function* rollEvents(S, E, seat) {
+  const alive = seat.filter(p => S.players[p].alive);
+  if (!alive.length) return;
+  const card = (icon, title, key, text, who, county) => E(`${icon} ${title}: ${text}`, 'event', county == null ? null : county, { who: who || [], cs: county == null ? [] : [county], vis: who && who.length ? undefined : 'all', card: { icon, title, key, text } });
+  if (S.season === 3 && rnd(S) < 0.25) {
+    S.mods.harsh = true;
+    yield card('🌨️', 'Harsh winter', 'harsh_winter', 'Blizzards close the passes (75% of marches into foreign land are snowed in) and food use climbs by 25%.', null);
+  }
+  const r = rnd(S);
+  const n = r < 0.35 ? 0 : r < 0.9 ? 1 : 2;
+  const table = [
+    ['plague', 2, () => true], ['bumper', 2, () => S.season === 2], ['drought', 1, () => S.season === 1 || S.season === 2],
+    ['merc', 2, () => S.season <= 1], ['bandits', 2, () => true], ['festival', 1.5, () => S.season === 1 || S.season === 2],
+    ['knight', 1.2, () => S.season !== 3], ['tournament', 0.8, () => S.season === 0]
+  ];
+  for (let k = 0; k < n; k++) {
+    const el = table.filter(t => t[2]());
+    const kind = pickWeighted(S, el.map(t => t[0]), el.map(t => t[1]));
+    const p = alive[Math.floor(rnd(S) * alive.length)];
+    const owned = S.counties.filter(c => c.owner === p);
+    switch (kind) {
+      case 'plague': {
+        if (!owned.length) break;
+        const c = pickWeighted(S, owned, owned.map(x => x.pop));
+        c.pop = Math.max(10, Math.round(c.pop * 0.82)); c.happiness = Math.max(0, c.happiness - 6);
+        const us = S.units.filter(u => u.county === c.id && u.owner === p && u.type !== 'hero').sort((x, y) => ustr(x) - ustr(y));
+        let extra = '';
+        if (us.length > 2 && rnd(S) < 0.5) { removeUnits(S, [us[0]]); extra = ' A soldier dies of the sickness.'; }
+        yield card('☠️', 'Plague in ' + cname(c.id), 'plague', `Sickness sweeps ${cname(c.id)}: peasants fall by 18% and the mood sours.${extra}`, [p], c.id);
+        break;
+      }
+      case 'bumper': S.mods.harvest[p] = 1.35; yield card('🌾', 'Bumper harvest', 'bumper_harvest', `${S.players[p].short}'s fields overflow: harvest +35% this Autumn.`, [p]); break;
+      case 'drought': S.mods.harvest[p] = 0.65; if (S.season === 1) S.mods.harvest[p] = 1; else yield card('🔥', 'Drought', 'drought', `A dry year scorches ${S.players[p].short}'s fields: harvest −35% this Autumn.`, [p]); break;
+      case 'festival': {
+        for (const c of owned) c.happiness = Math.min(100, c.happiness + 8);
+        yield card('🎉', 'Festival', 'festival', `Bonfires and dancing across ${S.players[p].short}'s lands: +8 mood everywhere.`, [p]);
+        break;
+      }
+      case 'tournament': {
+        const hs = S.heroes.filter(h => !h.captured);
+        for (const h of hs) heroGain(S, E, h, ['tactician', 'beloved']);
+        yield card('🏆', 'Royal tournament', 'tournament', 'Knights from every house joust for glory: every hero gains experience.', null);
+        break;
+      }
+      case 'bandits': {
+        const targets = owned.length ? owned : [];
+        if (!targets.length) break;
+        const c = targets[Math.floor(rnd(S) * targets.length)];
+        const comp = ['levy', 'levy', 'archers', 'archers'];
+        for (const t of comp) S.units.push({ id: S.nextId++, type: t, owner: -1, county: c.id, banner: false, pressed: false, raider: true });
+        yield card('🗡️', 'Bandits in ' + cname(c.id), 'bandits', `A band of outlaws raids ${cname(c.id)}! Defend it or lose gold and grain.`, [p], c.id);
+        break;
+      }
+      case 'merc': {
+        if (S.players[p].capital == null || !safeFor(S, S.players[p].capital, p)) break;
+        const price = 130;
+        const info = { kind: 'choice', ctype: 'merc', options: ['hire', 'decline'], player: p, price, desc: '3× Men-at-arms and 1× Knights', county: S.players[p].capital,
+          text: `A mercenary company, the Iron Wolves, offers its swords: 3× Men-at-arms and 1× Knights for ${price} gold.` };
+        const ev = card('⚔️', 'Mercenaries for hire', 'mercenaries', info.text, [p], S.players[p].capital);
+        yield ev;
+        const ch = yield* choose(S, info);
+        if (ch === 'hire' && S.players[p].gold >= price) {
+          S.players[p].gold -= price;
+          const cap = S.players[p].capital;
+          for (const t of ['maa', 'maa', 'maa', 'knights']) S.units.push({ id: S.nextId++, type: t, owner: p, county: cap, banner: false, pressed: false });
+          yield E(`${S.players[p].short} hires the Iron Wolves for ${price} gold.`, 'recruit', cap, { who: [p], cs: [cap] });
+        } else yield E(`${S.players[p].short} sends the mercenaries away.`, 'info', null, { who: [p] });
+        break;
+      }
+      case 'knight': {
+        const cap = S.players[p].capital;
+        if (cap == null || !safeFor(S, cap, p) || S.heroes.filter(h => h.owner === p).length >= 3) break;
+        const taken = new Set(S.heroes.map(h => h.name));
+        const name = HERO_NAMES.filter(x => !taken.has(x))[Math.floor(rnd(S) * Math.max(1, HERO_NAMES.filter(x => !taken.has(x)).length))] || 'Sir Wanderer';
+        const info = { kind: 'choice', ctype: 'heroOffer', options: ['accept', 'decline'], player: p, name, county: cap, text: `The famed knight ${name} arrives at court offering to lead your armies (wage 2 gold a season).` };
+        yield card('🛡️', 'A famed knight arrives', 'hero_arrives', info.text, [p], cap);
+        const ch = yield* choose(S, info);
+        if (ch === 'accept') { addHero(S, p, cap, name); yield E(`${name} swears fealty to ${S.players[p].short}.`, 'hero', cap, { who: [p], cs: [cap] }); }
+        else yield E(`${name} rides on to another court.`, 'info', null, { who: [p] });
+        break;
+      }
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ elimination */
+function eliminate(S, E, q, captor, disband) {
+  const qp = S.players[q];
+  qp.alive = false;
+  for (const c of S.counties) if (c.owner === q) {
+    c.owner = disband ? -1 : captor; c.happiness = Math.max(5, Math.min(c.happiness, 30) - 10); c.resent = 3; c.build = null; c.occ = null; c.tax = 'normal';
+    if (!(c.siege && c.castle > 0)) { c.siege = null; c.stores = 0; }
+  }
+  const mine = S.units.filter(u => u.owner === q);
+  if (disband) { removeUnits(S, mine); S.heroes = S.heroes.filter(h => h.owner !== q); }
+  else {
+    for (const u of mine) { u.owner = captor; u.pressed = u.type === 'hero' ? false : true; u.moved = false; }
+    for (const h of S.heroes) if (h.owner === q) h.owner = captor;
+    S.players[captor].gold += Math.floor(qp.gold / 2); S.players[captor].grain += Math.floor(qp.grain / 2);
+  }
+  qp.gold = 0; qp.grain = 0;
+  for (const c of S.counties) {   // a siege laid by a third party carries on against the new owner
+    if (!c.siege) continue;
+    const foes = S.units.filter(u => u.county === c.id && u.owner >= 0 && u.owner !== c.owner);
+    if (c.owner < 0 || !foes.length || !S.units.some(u => u.county === c.id && u.owner === c.owner)) { c.siege = null; continue; }
+    c.siege = { by: foes[0].owner, since: c.siege.since };
+  }
+}
+
+/* ------------------------------------------------------------------ the turn */
+function pruneHeroes(S) { S.heroes = S.heroes.filter(h => S.units.some(u => u.type === 'hero' && u.hid === h.id)); }
+function* resolveTurn(S, ordersByPlayer) {
+  try { yield* resolveTurnInner(S, ordersByPlayer); } finally { pruneHeroes(S); }
+}
+function* resolveTurnInner(S, ordersByPlayer) {
+  bind(S);
+  S.turnLog = [];
+  refreshVis(S);
+  const E = (text, kind, county, extra) => {
+    extra = extra || {};
+    const ev = { text, kind: kind || 'info', county: county == null ? null : county, season: S.season, year: S.year, turn: S.turn };
+    const cs = extra.cs || (county == null ? [] : [county]); const who = (extra.who || []).filter(x => x != null && x >= 0);
+    let vis;
+    if (extra.vis === 'all' || (!who.length && !cs.length)) vis = 'all';
+    else { vis = []; for (const p of S.players) if (who.includes(p.id) || (VIS && VIS[p.id] && p.alive && cs.some(c => VIS[p.id].has(c)))) vis.push(p.id); }
+    ev.vis = vis;
+    for (const k in extra) if (k !== 'cs' && k !== 'who' && k !== 'vis') ev[k] = extra[k];
+    S.log.push(ev); S.turnLog.push(ev);
+    if (S.log.length > 500) S.log.splice(0, S.log.length - 400);
+    return ev;
+  };
+  const NP = S.players.length;
+  const seat = shuffle(S, S.players.filter(p => p.alive).map(p => p.id));
+  const orders = S.players.map(p => p.alive ? sanitizeOrders(S, p.id, ordersByPlayer[p.id] || [], MAX_ORDERS) : []);
+  S.feints = S.feints.filter(f => f.until > S.turn);
   yield E(`${SEASONS[S.season]} of Year ${S.year}: the sealed orders are opened!`, 'phase');
 
+  /* ---- events */
+  yield* rollEvents(S, E, seat);
+  refreshVis(S);
+
   /* ---- decrees */
-  for (let p = 0; p < 2; p++) for (const o of orders[p]) if (o.type === 'tax') {
-    S.counties[o.county].tax = o.rate;
-    yield E(`${S.players[p].short} sets taxes in ${cname(o.county)} to ${TAX[o.rate].name}.`, 'decree', o.county);
+  const stormers = {};
+  for (const c of S.counties) c.sally = false;
+  for (const p of seat) for (const o of orders[p]) {
+    const me = S.players[p];
+    if (o.type === 'tax') { S.counties[o.county].tax = o.rate; yield E(`${me.short} sets taxes in ${cname(o.county)} to ${TAX[o.rate].name}.`, 'decree', null, { who: [p] }); }
+    else if (o.type === 'build') {
+      const c = S.counties[o.county], nl = CASTLE[c.castle + 1];
+      if (me.gold >= nl.cost && c.owner === p && !c.build) {
+        me.gold -= nl.cost; c.build = { level: c.castle + 1, left: nl.time };
+        yield E(`${me.short} begins building a ${nl.name} at ${cname(o.county)}.`, 'recruit', o.county, { who: [p], cs: [o.county] });
+      }
+    } else if (o.type === 'feint') {
+      if (me.gold >= FEINT_COST) {
+        me.gold -= FEINT_COST;
+        const power = Math.min(18, 4 + 0.5 * armyStrength(S, p));
+        S.feints.push({ id: S.nextId++, owner: p, county: o.to, power, until: S.turn + 1 });
+        yield E(`${me.short}'s spies spread rumours of an army massing near ${cname(o.to)}.`, 'info', null, { who: [p] });
+      }
+    } else if (o.type === 'scout') {
+      me.scouted[o.target] = S.turn + 1;
+      yield E(`${me.short}'s scouts ride out toward ${cname(o.target)}.`, 'info', null, { who: [p] });
+    } else if (o.type === 'sally') { S.counties[o.county].sally = true; }
+    else if (o.type === 'storm') { (stormers[o.county] = stormers[o.county] || new Set()).add(p); }
   }
+  refreshVis(S);
 
   /* ---- recruit & merge */
   const marching = new Set();
-  for (let p = 0; p < 2; p++) for (const o of orders[p]) if (o.type === 'march') for (const id of o.units) marching.add(id);
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < NP; p++) for (const o of orders[p]) {
+    if (o.type === 'march') for (const id of o.units) marching.add(id);
+    if (o.type === 'scout') for (const u of S.units) if (u.owner === p && u.county === o.from && u.type === 'scout') { marching.add(u.id); break; }
+  }
+  for (const p of seat) {
+    const me = S.players[p];
     for (const o of orders[p]) if (o.type === 'recruit') {
-      const d = UNITS[o.unit], me = S.players[p], c = S.counties[o.county];
-      if (c.owner !== p || me.gold < d.cost || hostileAt(S, o.county, p)) { yield E(`${me.short}'s recruits at ${cname(o.county)} are turned away.`, 'warn', o.county); continue; }
+      const d = UNITS[o.unit], c = S.counties[o.county];
+      if (c.owner !== p || me.gold < d.cost || hostileAt(S, o.county, p)) { yield E(`${me.short}'s recruits at ${cname(o.county)} are turned away.`, 'warn', null, { who: [p] }); continue; }
       me.gold -= d.cost; c.pop = Math.max(5, c.pop - d.pop);
       S.units.push({ id: S.nextId++, type: o.unit, owner: p, county: o.county, banner: false, pressed: false });
-      yield E(`${me.short} musters ${d.name} at ${cname(o.county)}.`, 'recruit', o.county);
+      yield E(`${me.short} musters ${d.name} at ${cname(o.county)}.`, 'recruit', o.county, { who: [p], cs: [o.county] });
     }
     for (const o of orders[p]) if (o.type === 'merge') {
       const three = pickMerge(S, p, o.county, o.unit, marching);
-      if (!three) { yield E(`${S.players[p].short}'s banner-raising at ${cname(o.county)} fails: not enough troops.`, 'warn', o.county); continue; }
+      if (!three) { yield E(`${me.short}'s banner-raising at ${cname(o.county)} fails: not enough troops.`, 'warn', null, { who: [p] }); continue; }
       three[0].banner = true; removeUnits(S, [three[1], three[2]]);
-      yield E(`${S.players[p].short} raises a Banner of ${UNITS[o.unit].plural} at ${cname(o.county)}!`, 'recruit', o.county);
+      yield E(`${me.short} raises a Banner of ${UNITS[o.unit].plural} at ${cname(o.county)}!`, 'recruit', o.county, { who: [p], cs: [o.county] });
     }
   }
+  refreshVis(S);
 
   /* ---- movement */
-  for (const u of S.units) { u.moved = false; u.from = null; u.stance = null; delete u._nst; }
+  for (const u of S.units) { u.moved = false; u.from = null; u.stance = null; u.storm = false; delete u._nst; }
   const groups = [];
-  for (let p = 0; p < 2; p++) for (const o of orders[p]) if (o.type === 'march') {
+  for (const p of seat) for (const o of orders[p]) if (o.type === 'march') {
     const units = o.units.map(id => unitById(S, id)).filter(Boolean);
     if (!units.length) continue;
-    if (S.season === 3 && S.counties[o.to].owner !== p && rnd(S) < 0.5) {
-      yield E(`❄ Snow blocks the road: ${S.players[p].short}'s army cannot leave ${cname(o.from)} for ${cname(o.to)}.`, 'warn', o.from);
+    const swift = units.some(u => u.type === 'hero' && (heroOfUnit(S, u) || { traits: [] }).traits.includes('swift'));
+    if (S.season === 3 && S.counties[o.to].owner !== p && !swift && rnd(S) < (S.mods.harsh ? 0.75 : 0.5)) {
+      yield E(`❄ Snow blocks the road: ${S.players[p].short}'s army cannot leave ${cname(o.from)} for ${cname(o.to)}.`, 'warn', null, { who: [p], cs: [o.from] });
       continue;
     }
-    groups.push({ owner: p, from: o.from, to: o.to, units, stance: o.stance, alive: true });
+    groups.push({ owner: p, from: o.from, to: o.to, units, stance: o.stance, storm: !!o.storm, alive: true });
   }
-  for (const g of groups) for (const u of g.units) { u.moved = true; u.from = g.from; u.stance = g.stance; }
-  // swaps: hostile armies passing each other meet in the open
+  for (const g of groups) for (const u of g.units) { u.moved = true; u.from = g.from; u.stance = g.stance; u.storm = g.storm; }
+  if (groups.length) {
+    const moves = groups.map(g => {
+      const vis = []; for (const p of S.players) if (p.alive && (p.id === g.owner || (VIS[p.id] && (VIS[p.id].has(g.from) || VIS[p.id].has(g.to))))) vis.push(p.id);
+      return { from: g.from, to: g.to, owner: g.owner, ids: g.units.map(u => u.id), n: g.units.length, pow: Math.round(sumStr(g.units)), vis };
+    });
+    yield E('The armies set out across the realm!', 'movement', null, { vis: 'all', moves });
+  }
   for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++) {
     const a = groups[i], b = groups[j];
     if (!a.alive || !b.alive || a.owner === b.owner) continue;
     if (a.from === b.to && a.to === b.from) {
-      yield E(`Armies meet on the road between ${cname(a.from)} and ${cname(a.to)}!`, 'move', a.from);
+      yield E(`Armies meet on the road between ${cname(a.from)} and ${cname(a.to)}!`, 'move', null, { who: [a.owner, b.owner], cs: [a.from, a.to] });
       const sides = [
         { owner: a.owner, units: a.units.slice(), stance: a.stance, defending: false },
         { owner: b.owner, units: b.units.slice(), stance: b.stance, defending: false }
@@ -420,72 +1005,152 @@ function* resolveTurn(S, ordersByPlayer) {
     g.units = g.units.filter(u => S.units.includes(u));
     if (!g.units.length) continue;
     for (const u of g.units) u.county = g.to;
-    const kind = S.counties[g.to].owner === g.owner ? 'move' : 'move';
-    yield E(`${S.players[g.owner].short} marches ${describeUnits(g.units)} from ${cname(g.from)} to ${cname(g.to)}.`, kind, g.to, { arrow: { from: g.from, to: g.to, owner: g.owner } });
+    yield E(`${S.players[g.owner].short} marches ${describeUnits(g.units)} from ${cname(g.from)} to ${cname(g.to)}.`, 'move', g.to, { who: [g.owner], cs: [g.from, g.to], quick: true });
   }
+  refreshVis(S);
 
-  /* ---- clashes */
-  for (let pass = 0; pass < 4; pass++) {
+  /* ---- clashes (incl. sieges) */
+  const settled = new Set();
+  for (let pass = 0; pass < 5; pass++) {
     let any = false;
-    for (let cid = 0; cid < MAP.n; cid++) {
+    for (const cid of shuffle(S, Array.from({ length: MAP.n }, (_, i) => i))) {
+      if (settled.has(cid)) continue;
       const here = unitsAt(S, cid);
       const owners = [...new Set(here.map(u => u.owner))];
       if (owners.length < 2) continue;
-      any = true;
-      const sides = owners.map(o => {
+      const c = S.counties[cid];
+      const mk = o => {
         const us = here.filter(u => u.owner === o);
-        const defending = us.some(u => !u.moved);
-        return { owner: o, units: us, stance: dominantStance(S, us, cid), defending };
-      });
-      yield* fightCounty(S, E, cid, sides, { field: false, label: `at ${cname(cid)}`, hint: cid });
+        return { owner: o, units: us, stance: dominantStance(S, us, cid), defending: us.some(u => !u.moved && !u.rebel && !u.raider), mult: 1 };
+      };
+      const sides = owners.map(mk);
+      const castleCase = c.castle > 0 && c.owner >= 0 && sides.some(s => s.owner === c.owner) && sides.some(s => s.owner >= 0 && s.owner !== c.owner);
+      if (!castleCase) { any = true; yield* fightCounty(S, E, cid, sides, { field: false, label: `at ${cname(cid)}`, hint: cid }); continue; }
+      const gs = sides.find(s => s.owner === c.owner);
+      const neutral = sides.filter(s => s.owner < 0);
+      if (neutral.length) { any = true; yield* fightCounty(S, E, cid, [gs].concat(neutral), { field: false, label: `at ${cname(cid)}`, hint: cid }); continue; }
+      const att = sides.filter(s => s.owner >= 0 && s.owner !== c.owner);
+      if (att.length > 1) { any = true; yield* fightCounty(S, E, cid, att, { field: false, label: `outside ${cname(cid)}`, hint: cid }); continue; }
+      const a = att[0];
+      const relief = gs.units.some(u => u.moved);
+      const storm = a.units.some(u => u.storm) || (stormers[cid] && stormers[cid].has(a.owner));
+      if (relief || c.sally) {
+        any = true;
+        gs.defending = false; a.defending = false; gs.mult = relief ? 1 : 1.1;
+        yield* fightCounty(S, E, cid, [gs, a], { field: false, noCastle: true, label: relief ? `relieving ${cname(cid)}` : `at ${cname(cid)} (the garrison sallies out)`, hint: cid });
+      } else if (storm) {
+        any = true;
+        gs.defending = true; a.mult = stormPenalty(S, cid, a);
+        yield* fightCounty(S, E, cid, [gs, a], { field: false, storm: true, label: `storming the ${CASTLE[c.castle].name} of ${cname(cid)}`, hint: cid });
+      } else {
+        settled.add(cid);
+        if (!c.siege || c.siege.by !== a.owner) {
+          c.siege = { by: a.owner, since: S.turn };
+          yield E(`🏰 ${S.players[a.owner].short} lays siege to ${cname(cid)}! The garrison of ${S.players[c.owner].short} is shut inside (stores ${Math.round(c.stores)}).`, 'alarm', cid, { who: [a.owner, c.owner], cs: [cid] });
+        }
+      }
     }
     if (!any) break;
   }
-  for (const u of S.units) { u.moved = false; u.from = null; u.stance = null; delete u._nst; }
+  // raiders: raid or disperse
+  for (const c of S.counties) {
+    const rs = S.units.filter(u => u.county === c.id && u.raider);
+    if (!rs.length) continue;
+    if (c.owner >= 0 && !S.units.some(u => u.county === c.id && u.owner === c.owner)) {
+      const me = S.players[c.owner]; const g = Math.min(me.gold, 20), gr = Math.min(Math.round(me.grain), 12);
+      me.gold -= g; me.grain -= gr; c.happiness = Math.max(0, c.happiness - 4);
+      yield E(`🗡️ Bandits plunder ${cname(c.id)}: −${g} gold, −${gr} grain.`, 'warn', c.id, { who: [c.owner], cs: [c.id] });
+    }
+    removeUnits(S, rs);
+  }
+  for (const u of S.units) { u.moved = false; u.from = null; u.stance = null; u.storm = false; delete u._nst; }
+  refreshVis(S);
+
+  /* ---- siege attrition */
+  for (const c of S.counties) {
+    if (!c.siege) continue;
+    const inside = S.units.filter(u => u.county === c.id && u.owner === c.owner);
+    const besiegers = S.units.filter(u => u.county === c.id && u.owner >= 0 && u.owner !== c.owner);
+    if (c.owner < 0 || !inside.length || !besiegers.length) { c.siege = null; continue; }
+    c.siege.by = besiegers[0].owner;
+    const need = inside.reduce((t, u) => t + ufood(u), 0) * winterMult(S);
+    c.stores -= need; c.happiness = Math.max(0, c.happiness - 4);
+    if (c.stores < 0) {
+      c.stores = 0;
+      yield E(`🍞 The besieged garrison of ${cname(c.id)} has eaten its last stores and surrenders!`, 'capture', c.id, { who: [c.owner, c.siege.by], cs: [c.id] });
+      const by = c.siege.by, owner = c.owner;
+      removeUnits(S, inside);
+      c.siege = null;
+      yield* processCaptives(S, E, by, owner, inside, c.id, c.id, 'surrender');
+    } else {
+      yield E(`Siege of ${cname(c.id)}: the garrison's stores fall to ${Math.round(c.stores)}.`, 'info', c.id, { who: [c.owner, c.siege.by], cs: [c.id], quick: true });
+    }
+  }
 
   /* ---- ownership changes */
   for (const c of S.counties) {
     const present = [...new Set(unitsAt(S, c.id).map(u => u.owner))];
-    if (present.length === 1 && present[0] >= 0 && present[0] !== c.owner && !(MAP_DEF[c.id].capital !== undefined)) {
+    if (present.length === 1 && present[0] >= 0 && present[0] !== c.owner && c.cap == null) {
       const p = present[0], prev = c.owner;
-      c.owner = p;
-      if (prev >= 0) { c.happiness = Math.min(c.happiness, 35) - 10; c.resent = 3; } else { c.happiness = 45; c.resent = 2; }
-      c.happiness = Math.max(5, c.happiness);
-      c.tax = 'normal';
-      yield E(`${cname(c.id)} falls to ${S.players[p].short}${prev >= 0 ? ' (taken from ' + S.players[prev].short + ')' : ''}. The people are uneasy.`, 'capture', c.id);
+      c.owner = p; c.siege = null; c.build = null; c.stores = 0; c.lowTurns = 0;
+      if (prev >= 0) { c.happiness = Math.min(c.happiness, 30) - 10; c.resent = 4; } else { c.happiness = 42; c.resent = 2; }
+      c.happiness = Math.max(5, c.happiness); c.tax = 'normal';
+      if (c.castle > 0 && prev >= 0) c.castle--;
+      yield E(`${cname(c.id)} falls to ${S.players[p].short}${prev >= 0 ? ' (taken from ' + S.players[prev].short + ')' : ''}. The people are uneasy.`, 'capture', c.id, { who: [p, prev], cs: [c.id] });
+    } else if (present.length === 1 && present[0] < 0 && c.owner >= 0 && c.cap == null && S.units.some(u => u.county === c.id && u.rebel)) {
+      const prev = c.owner; c.owner = -1; c.siege = null; c.build = null; c.lowTurns = 0;
+      for (const u of S.units) if (u.county === c.id) u.rebel = false;
+      yield E(`🔥 ${cname(c.id)} throws off ${S.players[prev].short}'s rule: the rebels hold the county!`, 'alarm', c.id, { who: [prev], cs: [c.id] });
     }
+    if (c.siege && !S.units.some(u => u.county === c.id && u.owner >= 0 && u.owner !== c.owner)) c.siege = null;
   }
+  refreshVis(S);
 
   /* ---- banner occupation */
-  let winner = null, draw = false;
-  for (let q = 0; q < 2; q++) {
+  const captures = [];
+  for (const q of seat) {
     const capId = S.players[q].capital, cc = S.counties[capId];
-    const r = 1 - q;
-    const mine = unitsAt(S, capId, q).length, theirs = unitsAt(S, capId, r);
+    const mine = unitsAt(S, capId, q).length;
+    const theirs = unitsAt(S, capId).filter(u => u.owner >= 0 && u.owner !== q);
     const inf = theirs.filter(u => UNITS[u.type].infantry);
     if (!mine && inf.length) {
+      const r = inf[0].owner;
       if (cc.occ && cc.occ.by === r) cc.occ.count++; else cc.occ = { by: r, count: 1 };
-      if (cc.occ.count >= 2) {
-        if (winner !== null) draw = true;
-        winner = r;
-        yield E(`${S.players[r].short}'s infantry have held ${cname(capId)} for a full season. The Royal Banner of ${S.players[q].short} is captured!`, 'win', capId);
-      } else {
-        yield E(`🚩 ${S.players[r].short}'s infantry occupy ${cname(capId)}! If they hold it through next season, the Royal Banner of ${S.players[q].short} is lost.`, 'alarm', capId);
-      }
+      if (cc.occ.count >= 2) captures.push({ victim: q, captor: r });
+      else yield E(`🚩 ${S.players[r].short}'s infantry occupy ${cname(capId)}! If they hold it through next season, the Royal Banner of ${S.players[q].short} is lost.`, 'alarm', capId, { who: [r, q], cs: [capId] });
     } else {
-      if (!mine && theirs.length) yield E(`${S.players[r].short}'s cavalry ride through ${cname(capId)}, but only infantry can seize a banner.`, 'info', capId);
+      if (!mine && theirs.length) yield E(`${S.players[theirs[0].owner].short}'s cavalry ride through ${cname(capId)}, but only infantry can seize a banner.`, 'info', capId, { who: [q], cs: [capId] });
       cc.occ = null;
     }
   }
-  if (winner !== null) {
-    S.over = draw ? { winner: null, reason: 'banner' } : { winner, reason: 'banner' };
-    if (draw) yield E('Both Royal Banners fall in the same season. The realm collapses into chaos: a draw.', 'win');
-    return;
+  if (captures.length) {
+    const victims = new Set(captures.map(c => c.victim));
+    const aliveN = alivePlayers(S).length;
+    if (victims.size >= aliveN) {
+      for (const c of captures) yield E(`${S.players[c.captor].short} seizes the Royal Banner of ${S.players[c.victim].short}!`, 'win', S.players[c.victim].capital, { vis: 'all' });
+      yield E('Every Royal Banner falls in the same season. The realm collapses into chaos: a draw.', 'win', null, { vis: 'all' });
+      S.over = { winner: null, reason: 'banner' };
+      return;
+    }
+    for (const c of captures) {
+      const q = c.victim;
+      yield E(`${S.players[c.captor].short}'s infantry have held ${cname(S.players[q].capital)} for a full season. The Royal Banner of ${S.players[q].short} is captured and ${S.players[q].name} is no more!`, 'win', S.players[q].capital, { vis: 'all' });
+      eliminate(S, E, q, c.captor, victims.has(c.captor));
+    }
+    refreshVis(S);
+    const left = alivePlayers(S);
+    if (left.length === 1) { S.over = { winner: left[0].id, reason: 'banner' }; return; }
+    if (!left.some(p => p.human)) {
+      const best = left.slice().sort((a, b) => countiesOf(S, b.id).length - countiesOf(S, a.id).length)[0];
+      S.over = { winner: best.id, reason: 'banner' };
+      return;
+    }
   }
 
   /* ---- seasonal economy */
-  for (let p = 0; p < 2; p++) {
+  for (const p of seat) {
     const me = S.players[p];
+    if (!me.alive) continue;
     const harvest = harvestFor(S, p);
     const income = incomeFor(S, p);
     const need = foodNeedFor(S, p);
@@ -494,218 +1159,131 @@ function* resolveTurn(S, ordersByPlayer) {
     let starving = false;
     if (me.gold < 0) {
       me.gold = 0;
-      const mine = S.units.filter(u => u.owner === p).sort((a, b) => ustr(a) - ustr(b));
+      const mine = S.units.filter(u => u.owner === p && u.type !== 'hero').sort((a, b) => ustr(a) - ustr(b));
       const lose = mine.slice(0, Math.max(1, Math.floor(mine.length * 0.15)));
       removeUnits(S, lose);
-      yield E(`💰 ${me.short} cannot pay the wages! ${lose.length} unpaid unit(s) desert.`, 'warn', null);
+      yield E(`💰 ${me.short} cannot pay the wages! ${lose.length} unpaid unit(s) desert.`, 'warn', null, { who: [p] });
     }
     if (me.grain < 0) {
       me.grain = 0; starving = true;
-      const mine = S.units.filter(u => u.owner === p).sort((a, b) => ustr(a) - ustr(b));
+      const mine = S.units.filter(u => u.owner === p && u.type !== 'hero').sort((a, b) => ustr(a) - ustr(b));
       const lose = mine.slice(0, Math.max(1, Math.floor(mine.length * 0.2)));
       removeUnits(S, lose);
-      yield E(`🌾 ${me.short}'s granaries are empty! Famine: ${lose.length} unit(s) desert.`, 'warn', null);
+      yield E(`🌾 ${me.short}'s granaries are empty! Famine: ${lose.length} unit(s) desert.`, 'warn', null, { who: [p] });
     }
     for (const c of S.counties) if (c.owner === p) {
       let d = TAX[c.tax].happy + Math.round((55 - c.happiness) * 0.1);
       if (c.resent > 0) { d -= 3; c.resent--; }
       if (starving) { d -= 10; c.pop = Math.max(10, Math.round(c.pop * 0.96)); }
-      const before = c.happiness;
+      if (S.units.some(u => u.county === c.id && u.owner === p && u.type === 'hero' && (heroOfUnit(S, u) || { traits: [] }).traits.includes('beloved'))) d += 2;
       c.happiness = Math.max(0, Math.min(100, c.happiness + d));
-      if (!starving && c.happiness >= 30 && c.pop < c.maxPop) c.pop = Math.min(c.maxPop, Math.round(c.pop * 1.02) + 1);
+      if (!starving && c.happiness >= 30 && c.pop < c.maxPop && !c.siege) c.pop = Math.min(c.maxPop, Math.round(c.pop * 1.02) + 1);
       const un = c.happiness < 20;
-      if (un && !c.unrest) yield E(`😠 ${cname(c.id)} is in unrest and stops paying taxes!`, 'warn', c.id);
-      else if (!un && c.unrest) yield E(`🙂 ${cname(c.id)} has calmed and pays taxes again.`, 'info', c.id);
+      if (un && !c.unrest) yield E(`😠 ${cname(c.id)} is in unrest and stops paying taxes!`, 'warn', c.id, { who: [p], cs: [c.id] });
+      else if (!un && c.unrest) yield E(`🙂 ${cname(c.id)} has calmed and pays taxes again.`, 'info', c.id, { who: [p], cs: [c.id] });
       c.unrest = un;
+      // construction & stores
+      if (c.build) { c.build.left--; if (c.build.left <= 0) { c.castle = c.build.level; c.build = null; c.stores = Math.min(CASTLE[c.castle].cap, c.stores + 10); yield E(`🏗️ The ${CASTLE[c.castle].name} of ${cname(c.id)} is complete!`, 'recruit', c.id, { who: [p], cs: [c.id] }); } }
+      if (c.castle > 0 && !c.siege) c.stores = Math.min(CASTLE[c.castle].cap, c.stores + Math.ceil(CASTLE[c.castle].cap * 0.3));
+      // rebellion
+      if (c.happiness < 15) c.lowTurns++; else c.lowTurns = 0;
+      if (c.lowTurns >= 2 && (rnd(S) < 0.6 || c.happiness <= 3)) {
+        const k = Math.max(2, Math.round(c.pop / 35));
+        for (let i = 0; i < k; i++) S.units.push({ id: S.nextId++, type: i % 3 === 2 ? 'archers' : 'levy', owner: -1, county: c.id, banner: false, pressed: false, rebel: true });
+        c.happiness = Math.min(100, c.happiness + 12); c.lowTurns = 0;
+        yield E(`🔥 Rebellion! ${k} rebels rise in ${cname(c.id)} against ${S.players[p].short}.`, 'alarm', c.id, { who: [p], cs: [c.id], card: { icon: '🔥', title: 'Rebellion in ' + cname(c.id), key: 'rebellion', text: `The people of ${cname(c.id)} have had enough: ${k} rebels take up arms against ${S.players[p].short}. Crush them, or lose the county.` } });
+      }
     }
-    yield E(`${me.short}'s treasury: +${income} taxes, −${wages} wages${harvest ? ', harvest +' + harvest + ' grain' : ''}, food consumed −${need}. Stores: ${me.gold}g, ${Math.round(me.grain)} grain.`, 'econ', null);
+    yield E(`${me.short}'s treasury: +${income} taxes, −${wages} wages${harvest ? ', harvest +' + harvest + ' grain' : ''}, food −${need}. Stores: ${me.gold}g, ${Math.round(me.grain)} grain.`, 'econ', null, { who: [p] });
   }
+  // neutral/unowned castles refill nothing; clear season mods
+  S.mods.harsh = false; S.mods.harvest = {};
+  for (const p of S.players) { for (const k of Object.keys(p.scouted)) if (p.scouted[k] < S.turn + 1) delete p.scouted[k]; }
 
   /* ---- next season */
   S.turn++;
   S.season = (S.season + 1) % 4;
   if (S.season === 0) S.year++;
-  if (S.turn >= TURN_LIMIT) {
-    const a = countiesOf(S, 0).length, b = countiesOf(S, 1).length;
-    let w = a > b ? 0 : b > a ? 1 : (armyStrength(S, 0) >= armyStrength(S, 1) ? 0 : 1);
-    S.over = { winner: w, reason: 'crown' };
-    yield E(`The long war ends. ${S.players[w].name} holds the most land and is crowned.`, 'win');
+  updateMemory(S);
+  if (S.turn >= TURN_LIMIT && !S.over) {
+    const ranked = alivePlayers(S).sort((a, b) => (countiesOf(S, b.id).length - countiesOf(S, a.id).length) || (armyStrength(S, b.id) - armyStrength(S, a.id)));
+    S.over = { winner: ranked[0].id, reason: 'crown' };
+    yield E(`The long war ends. ${ranked[0].name} holds the most land and is crowned.`, 'win', null, { vis: 'all' });
   }
 }
 
-function* fightCounty(S, E, cid, sides, opts) {
-  sides.sort((x, y) => (Number(y.defending) - Number(x.defending)) || (x.owner - y.owner));
-  let champ = sides[0];
-  for (let i = 1; i < sides.length; i++) {
-    const r = yield* duel(S, E, cid, champ, sides[i], opts);
-    champ = r.winner;
-  }
-  return { winner: champ };
-}
-
-function* duel(S, E, cid, a, b, opts) {
-  const field = opts.field;
-  const castle = cid != null && MAP_DEF[cid].capital !== undefined;
-  const ctx = { castle, defBonus: (!field && cid != null) ? terrainDef(cid) + (castle ? 0.3 : 0) : 0 };
-  let ta = sideStrength(a, b, ctx), tb = sideStrength(b, a, ctx);
-  const aw = BEATS[a.stance] === b.stance, bw = BEATS[b.stance] === a.stance;
-  if (aw) ta *= STANCE_BONUS; if (bw) tb *= STANCE_BONUS;
-  let winner, loser, wt, lt;
-  if (ta > tb) { winner = a; loser = b; wt = ta; lt = tb; }
-  else if (tb > ta) { winner = b; loser = a; wt = tb; lt = ta; }
-  else if (a.defending !== b.defending) { winner = a.defending ? a : b; loser = winner === a ? b : a; wt = lt = ta; }
-  else if (rnd(S) < 0.5) { winner = a; loser = b; wt = ta; lt = tb; } else { winner = b; loser = a; wt = tb; lt = ta; }
-  const ratio = lt > 0 ? wt / lt : 99;
-  const decisive = field || (winner.owner >= 0 && ratio >= DECISIVE);
-  // remember stances for AI learning
-  if (a.owner >= 0 && b.owner >= 0) { S.players[a.owner].lastEnemyStance = b.stance; S.players[b.owner].lastEnemyStance = a.stance; }
-  const sn = s => STANCE_INFO[s].icon + ' ' + STANCE_INFO[s].name;
-  const stanceNote = aw ? `${sn(a.stance)} beats ${sn(b.stance)}` : bw ? `${sn(b.stance)} beats ${sn(a.stance)}` : `both ${sn(a.stance)}`;
-  const side = (s, t) => `${pname(S, s.owner)} [${describeUnits(s.units)}; ${sn(s.stance)}${s.defending && !field ? ', defending' : ''}; power ${t.toFixed(1)}]`;
-  const outcome = decisive ? `${pname(S, winner.owner)} wins decisively.` : `${pname(S, winner.owner)} prevails; the beaten force is routed.`;
-  yield E(`⚔ Clash ${opts.label}: ${side(a, ta)} vs ${side(b, tb)}. ${stanceNote}. ${outcome}`, 'battle', opts.hint,
-    { battle: { a: { owner: a.owner, stance: a.stance, power: ta, units: describeUnits(a.units) }, b: { owner: b.owner, stance: b.stance, power: tb, units: describeUnits(b.units) }, winner: winner.owner, decisive, label: opts.label, note: stanceNote, outcome, ratio } });
-
-  const lus = loser.units.filter(u => S.units.includes(u));
-  let captured = [];
-  const desert = lus.filter(u => u.pressed);
-  if (desert.length) {
-    removeUnits(S, desert);
-    yield E(`${desert.length} pressed soldier(s) of ${pname(S, loser.owner)} throw down their arms and desert.`, 'info', opts.hint);
-  }
-  const rest = lus.filter(u => !u.pressed);
-  if (decisive) {
-    removeUnits(S, rest); captured = rest;
-  } else {
-    // rout: retreat
-    const cut = [];
-    const dest = new Map();
-    for (const u of rest) {
-      let t = null;
-      if (u.owner >= 0) {
-        if (u.moved && u.from != null && u.from !== cid && safeFor(S, u.from, u.owner)) t = u.from;
-        else {
-          const opts2 = (MAP.adj[cid] || []).filter(n => S.counties[n].owner === u.owner && safeFor(S, n, u.owner));
-          opts2.sort((x, y) => MAP.dist[x][S.players[u.owner].capital] - MAP.dist[y][S.players[u.owner].capital]);
-          if (opts2.length) t = opts2[0];
-        }
-      }
-      if (t == null) cut.push(u); else { u.county = t; u.moved = false; dest.set(t, (dest.get(t) || 0) + 1); }
-    }
-    if (dest.size) {
-      const names = [...dest.keys()].map(cname).join(', ');
-      yield E(`${pname(S, loser.owner)}'s routed troops fall back to ${names}.`, 'move', opts.hint);
-    }
-    if (loser.owner < 0 && rest.length) {
-      removeUnits(S, rest); // neutral garrison scatters
-      yield E(`The garrison scatters into the hills.`, 'info', opts.hint);
-    } else if (cut.length) {
-      if (winner.owner >= 0) { removeUnits(S, cut); captured = cut; }
-      else {
-        const home = homeFor(S, loser.owner);
-        if (home != null) for (const u of cut) { u.county = home; u.moved = false; } else removeUnits(S, cut);
-      }
-    }
-  }
-  if (captured.length && winner.owner >= 0) {
-    const value = Math.round(captured.reduce((t, u) => t + ucost(u), 0) * 0.6);
-    const land = field ? opts.landing[winner.owner] : cid;
-    const info = {
-      kind: 'choice', player: winner.owner, county: land, loser: loser.owner, count: captured.length,
-      desc: describeUnits(captured), value,
-      text: `${pname(S, winner.owner)} captures ${describeUnits(captured)}! Ransom, press into service, or release?`
-    };
-    E(info.text, 'capture', opts.hint);
-    const ans = yield info;
-    const choice = ['ransom', 'press', 'release'].includes(ans) ? ans : defaultChoice(S, info);
-    applyChoice(S, E, choice, winner.owner, loser.owner, captured, land, value, info);
-    yield S.turnLog[S.turnLog.length - 1];
-  }
-  return { winner, loser, decisive };
-}
-
-function defaultChoice(S, info) {
-  const me = S.players[info.player];
-  if (me.gold < 45 || me.grain < 40) return 'ransom';
-  if (info.loser < 0) return 'press';
-  return rnd(S) < 0.12 ? 'release' : 'press';
-}
-function applyChoice(S, E, choice, winnerOwner, loserOwner, units, landing, value, info) {
-  const wn = S.players[winnerOwner].short;
-  const sendHome = () => {
-    const home = homeFor(S, loserOwner);
-    if (home != null) for (const u of units) { u.owner = loserOwner; u.county = home; u.pressed = false; u.moved = false; S.units.push(u); }
-    return home;
-  };
-  if (choice === 'press') {
-    for (const u of units) { u.owner = winnerOwner; u.county = landing; u.pressed = true; u.moved = false; S.units.push(u); }
-    E(`${wn} presses ${describeUnits(units)} into service (they fight at ${Math.round(PRESSED_MULT * 100)}% and may desert if beaten).`, 'capture', landing);
-  } else if (choice === 'ransom') {
-    S.players[winnerOwner].gold += value;
-    if (loserOwner >= 0) S.players[loserOwner].gold = Math.max(0, S.players[loserOwner].gold - value);
-    const home = sendHome();
-    E(`${wn} ransoms the prisoners for ${value} gold${loserOwner >= 0 ? (home != null ? '; they march home to ' + MAP_DEF[home].name : '; their home is occupied, so they disband') : ''}.`, 'econ', landing);
-  } else {
-    S.players[winnerOwner].renown++;
-    for (const c of S.counties) if (c.owner === winnerOwner) c.happiness = Math.min(100, c.happiness + 3);
-    const home = sendHome();
-    E(`${wn} releases the prisoners. Word of this mercy spreads: +3 happiness across ${wn}'s realm${loserOwner >= 0 && home == null ? '; the freed men disband' : ''}.`, 'info', landing);
-  }
-}
-
-/** Drive a whole turn synchronously. chooser(S, info) -> 'ransom'|'press'|'release'. */
+/** Drive a whole turn synchronously. chooser(S, info) answers human choices. */
 function runTurn(S, ordersByPlayer, chooser) {
   const g = resolveTurn(S, ordersByPlayer);
   let r = g.next();
   while (!r.done) {
     let ans;
-    if (r.value && r.value.kind === 'choice') ans = chooser ? chooser(S, r.value) : defaultChoice(S, r.value);
+    if (r.value && r.value.kind === 'choice') ans = chooser ? chooser(S, r.value) : autoChoice(S, r.value);
     r = g.next(ans);
   }
   return S.turnLog;
 }
 
-/* ------------------------------------------------------------------ AI */
+/* ------------------------------------------------------------------ AI (fog-respecting) */
 function aiOrders(S, pid) {
-  const me = S.players[pid], fid = 1 - pid, foe = S.players[fid];
-  const cap = me.capital, fcap = foe.capital;
-  const winter = S.season === 3;
+  const CS = shuffle(S, S.counties);   // county iteration order is randomised so ids never decide ties
+  bind(S);
+  const me = S.players[pid];
+  if (!me.alive || !me.ai) return [];
+  const prof = PERSONALITIES[me.ai.personality] || PERSONALITIES.warlord;
+  const lv = DIFFICULTY[me.ai.level] || DIFFICULTY.normal;
+  const view = viewUnits(S, pid);
+  const vis = visSet(S, pid);
+  const cap = me.capital, winter = S.season === 3;
+  const rivals = S.players.filter(p => p.alive && p.id !== pid);
+  const mineAll = view.filter(u => u.owner === pid);
+  const mine = c => mineAll.filter(u => u.county === c);
+  const othersAt = c => view.filter(u => u.owner !== pid && u.county === c);
+  const isThreat = u => u.owner !== pid && (u.owner >= 0 || u.rebel || u.raider);
+  const strRival = c => sumStr(view.filter(u => u.county === c && u.owner >= 0 && u.owner !== pid));
+  const threat = c => { let t = sumStr(view.filter(u => u.county === c && isThreat(u))); for (const n of MAP.adj[c]) t += 0.9 * strRival(n); return t; };
+  const jitter = () => 1 - lv.jitter / 2 + rnd(S) * lv.jitter;
+  const defRaw = t => {
+    if (vis.has(t)) return sumStr(othersAt(t)) * (1 + terrainDef(t)) * 1.15;
+    const m = me.mem[t]; if (m) return m.pow * (1 + terrainDef(t)) * 1.2;
+    return (S.counties[t].owner < 0 ? 6 : 9) * (1 + terrainDef(t));
+  };
+  const defEstimate = t => defRaw(t) * (1 + CASTLE[S.counties[t].castle].def * (vis.has(t) ? 1 : 0.5) / (1 + terrainDef(t)));
+  const castleInside = t => { const c = S.counties[t]; return c.castle > 0 && c.owner >= 0 && c.owner !== pid && othersAt(t).some(u => u.owner === c.owner) ? c.castle : 0; };
+  const pickStance = () => { if (me.lastEnemyStance && rnd(S) < 0.3 * lv.smart) return counterOfStance(me.lastEnemyStance); return pickWeighted(S, STANCES, [1.1, 1, 1]); };
   const cands = [];
-  const mine = c => S.units.filter(u => u.owner === pid && u.county === c);
-  const strAt = (c, o) => sumStr(S.units.filter(u => u.owner === o && u.county === c));
-  const threat = c => { let t = strAt(c, fid); for (const n of MAP.adj[c]) t += 0.9 * strAt(n, fid); return t; };
-  const defEstimate = t => {
-    const us = S.units.filter(u => u.county === t && u.owner !== pid);
-    return sumStr(us) * (1 + terrainDef(t) + (MAP_DEF[t].capital !== undefined ? 0.3 : 0)) * 1.15;
-  };
-  const pickStance = () => {
-    if (me.lastEnemyStance && rnd(S) < 0.3) return counterOfStance(me.lastEnemyStance);
-    return pickWeighted(S, STANCES, [1.1, 1, 1]);
-  };
-  const jitter = () => 0.85 + rnd(S) * 0.3;
+  const idle = me.idle || 0;
+  const bold = Math.min(1.6, (idle / 4) * prof.boldRate);
+  const early = S.turn < prof.restraint;
 
-  const idle = me.idle || 0;                      // consecutive turns without a march
-  const bold = Math.min(1.6, idle / 4);               // grows while stalemated
-  // reserves
+  // reserves (units that stay home)
   const reserved = new Set();
   const reserveAt = (c, want) => {
-    const us = mine(c).sort((a, b) => ustr(b) - ustr(a));
-    let got = 0;
-    for (const u of us) { if (got >= want) break; reserved.add(u.id); got += ustr(u); }
+    const us = mine(c).filter(u => u.type !== 'scout' && u.type !== 'engine').sort((a, b) => ustr(b) - ustr(a));
+    let got = 0; for (const u of us) { if (got >= want) break; reserved.add(u.id); got += ustr(u); }
   };
   const capThreat = threat(cap);
-  reserveAt(cap, Math.max(4, 1.4 * capThreat));
-  for (const c of S.counties) if (c.owner === pid && c.id !== cap) {
+  reserveAt(cap, Math.max(4, prof.reserve * 1.4 * capThreat));
+  for (const c of CS) if (c.owner === pid && c.id !== cap) {
     const t = threat(c.id);
     if (t > 0) reserveAt(c.id, t * (1.1 - 0.5 * bold));
   }
-  const free = c => mine(c).filter(u => !reserved.has(u.id));
+  // camped besiegers stay put
+  for (const c of CS) if (c.siege && c.siege.by === pid) for (const u of mine(c.id)) reserved.add(u.id);
+  const free = c => mine(c).filter(u => !reserved.has(u.id) && u.type !== 'scout' && u.type !== 'engine');
+  const engines = c => mine(c).filter(u => u.type === 'engine');
+
+  // sally decisions for besieged counties
+  for (const c of CS) if (c.owner === pid) {
+    const besg = view.filter(u => u.county === c.id && u.owner >= 0 && u.owner !== pid);
+    if (c.castle > 0 && besg.length && mine(c.id).length && (sumStr(mine(c.id)) * 1.1) / (sumStr(besg) || 1) >= (1.2 - 0.25 * bold) && rnd(S) < 0.5 + 0.5 * lv.smart) cands.push({ score: 80, order: { type: 'sally', county: c.id } });
+  }
 
   // 1. capital defence
-  const capStr = strAt(cap, pid);
-  if (capStr < 1.4 * capThreat) {
+  const capStr = sumStr(mine(cap));
+  if (capStr < prof.reserve * 1.4 * capThreat) {
     for (const n of MAP.adj[cap]) {
-      const us = mine(n);
+      const us = mine(n).filter(u => u.type !== 'scout' && u.type !== 'engine');
       if (!us.length || S.counties[n].owner !== pid) continue;
       const nt = threat(n);
       const give = us.filter(u => !reserved.has(u.id) || nt < capThreat * 0.5);
@@ -715,65 +1293,89 @@ function aiOrders(S, pid) {
     cands.push({ score: 139, order: { type: 'recruit', unit: 'archers', county: cap } });
   }
 
+  // 1b. storm decisions for camped stacks
+  for (const c of CS) if (c.siege && c.siege.by === pid && lv.storm) {
+    const grp = mine(c.id).filter(u => u.type !== 'scout');
+    const inside = othersAt(c.id).filter(u => u.owner === c.owner);
+    if (!grp.length || !inside.length) continue;
+    const M = stormPenalty(S, c.id, { units: grp });
+    const dpow = sumStr(inside) * (1 + terrainDef(c.id) + CASTLE[c.castle].def) * 1.15;
+    const ratio = sumStr(grp) * M / (dpow || 1);
+    if (ratio >= prof.stormRatio + lv.ratioAdd * 0.5 - 0.3 * bold || c.stores <= 6) if (ratio > 0.9) cands.push({ score: 95 + ratio, order: { type: 'storm', county: c.id } });
+  }
+
   // 2. attacks / grabs
-  const myTotal = armyStrength(S, pid), foeTotal = armyStrength(S, fid);
-  for (const c of S.counties) {
-    const sendable = free(c.id);
-    if (!sendable.length || c.owner !== pid && !hostileAt(S, c.id, pid) && false) continue;
-    sendable.sort((x, y) => ustr(y) - ustr(x));
+  const weakRival = rivals.slice().sort((a, b) => (me.mem[a.capital] ? me.mem[a.capital].pow : 6) - (me.mem[b.capital] ? me.mem[b.capital].pow : 6))[0];
+  for (const c of CS) {
+    const sendable = free(c.id).sort((x, y) => ustr(y) - ustr(x));
+    if (!sendable.length) continue;
     for (const t of MAP.adj[c.id]) {
       const tc = S.counties[t];
-      if (tc.owner === pid && !hostileAt(S, t, pid)) continue;
+      if (tc.owner === pid && !hostileAt2(view, t, pid)) continue;
+      const L = castleInside(t);
+      const isRivalCap = tc.cap != null && tc.cap !== pid;
+      const rivalTarget = tc.owner >= 0 && tc.owner !== pid;
       const defStr = defEstimate(t);
-      const isFoeCap = t === fcap;
-      const ratioNeed = (tc.owner < 0 ? 1.25 : 1.35) - 0.3 * bold;
-      let group = [];
-      if (defStr === 0) {
+      let ratioNeed = (rivalTarget ? prof.ratioFoe : prof.ratioNeutral) + lv.ratioAdd - 0.3 * bold * (rivalTarget ? 1 : 0.6);
+      if (early && rivalTarget) ratioNeed += 1.2;
+      let group = [], storm = false;
+      const def0 = vis.has(t) ? othersAt(t).length === 0 : false;
+      if (def0) {
         const infantry = sendable.filter(u => UNITS[u.type].infantry).sort((x, y) => ustr(x) - ustr(y));
-        const pool = isFoeCap ? infantry : sendable.slice().sort((x, y) => ustr(x) - ustr(y));
+        const pool = isRivalCap ? infantry : sendable.slice().sort((x, y) => ustr(x) - ustr(y));
         if (pool.length) group = [pool[0]];
+      } else if (L > 0) {
+        const grp = sendable.concat(engines(c.id));
+        const M = stormPenalty(S, t, { units: grp });
+        const raw = sumStr(grp);
+        if (lv.storm && raw * M >= defStr * ratioNeed * 1.05 && raw * M > 0) { group = grp; storm = true; }
+        else if (raw >= defRaw(t) * 0.8 && me.grain > 60 && (rivalTarget ? !early : true)) { group = grp.filter(u => u.type !== 'engine' || engines(c.id).length); }
       } else {
         let got = 0;
         for (const u of sendable) { group.push(u); got += ustr(u); if (got >= defStr * ratioNeed * 1.15) break; }
         if (sumStr(group) < defStr * ratioNeed) group = [];
       }
       if (!group.length) continue;
-      if (isFoeCap && !group.some(u => UNITS[u.type].infantry)) continue;
-      const margin = defStr === 0 ? 2 : sumStr(group) / defStr;
-      let value = isFoeCap ? 220 : tc.owner === fid ? 45 + tc.pop / 5 : 28 + tc.pop / 5;
+      if (isRivalCap && !group.some(u => UNITS[u.type].infantry)) continue;
+      if (!group.some(u => u.type !== 'engine')) continue;
+      const margin = def0 ? 2 : Math.max(0.5, sumStr(group) / (defStr || 1));
+      let value = isRivalCap ? 220 : rivalTarget ? (45 + tc.pop / 5) * prof.rivalValue : (28 + tc.pop / 5) * prof.neutralValue;
+      if (me.ai.personality === 'schemer' && weakRival && tc.owner === weakRival.id) value *= 1.4;
       value *= (1 + Math.min(2, margin - 1) * 0.3) * jitter();
       if (winter) value *= 0.6;
-      cands.push({ score: value, order: { type: 'march', from: c.id, to: t, units: group.map(u => u.id), stance: pickStance() } });
+      if (L > 0 && !storm) value *= 0.55;
+      cands.push({ score: value, order: { type: 'march', from: c.id, to: t, units: group.map(u => u.id), stance: pickStance(), storm } });
     }
   }
 
-  // 3. advance toward the enemy capital
-  if (myTotal >= foeTotal * 0.9 && !winter) {
-    for (const c of S.counties) {
+  // 3. advance toward a rival capital
+  const myTotal = sumStr(mineAll), rivalTotal = sumStr(view.filter(u => u.owner >= 0 && u.owner !== pid)) / Math.max(1, rivals.length);
+  const targetCap = rivals.length ? rivals.slice().sort((a, b) => MAP.dist[cap][a.capital] - MAP.dist[cap][b.capital] || a.id - b.id)[0].capital : null;
+  if (targetCap != null && prof.rivalValue >= 0.9 && !early && myTotal >= rivalTotal * 0.9 && !winter) {
+    for (const c of CS) {
       const sendable = free(c.id);
       if (sendable.length < 2 || c.id === cap) continue;
       let best = null;
-      for (const n of MAP.adj[c.id]) if (MAP.dist[n][fcap] < MAP.dist[c.id][fcap] && S.counties[n].owner === pid) best = n;
+      for (const n of MAP.adj[c.id]) if (MAP.dist[n][targetCap] < MAP.dist[c.id][targetCap] && S.counties[n].owner === pid) best = n;
       if (best == null) continue;
       cands.push({ score: 30 * jitter(), order: { type: 'march', from: c.id, to: best, units: sendable.map(u => u.id), stance: 'hold' } });
     }
   }
-
-  // 3b. rally free units toward the nearest worthwhile target (neutral or enemy county)
+  // 3b. rally toward the nearest worthwhile target
   if (!winter) {
-    for (const c of S.counties) {
+    for (const c of CS) {
       if (c.owner !== pid) continue;
       const sendable = free(c.id);
       if (!sendable.length) continue;
       const sstr = sumStr(sendable);
       let bestT = null, bestV = 0;
-      for (const t of S.counties) {
+      for (const t of CS) {
         if (t.owner === pid) continue;
         const d = MAP.dist[c.id][t.id];
         if (d < 2 || d > 4) continue;
-        const need = defEstimate(t.id) * 1.3;
-        if (sstr < need) continue;
-        const v = (t.owner === fid ? 40 : 25) / d;
+        if (t.owner >= 0 && early) continue;
+        if (sstr < defEstimate(t.id) * 1.3) continue;
+        const v = (t.owner >= 0 ? 40 * prof.rivalValue : 25 * prof.neutralValue) / d;
         if (v > bestV) { bestV = v; bestT = t; }
       }
       if (!bestT) continue;
@@ -784,76 +1386,111 @@ function aiOrders(S, pid) {
   }
 
   // 4. merges
-  for (const c of S.counties) if (c.owner === pid) {
-    for (const t of UNIT_TYPES) {
-      const n = mine(c.id).filter(u => u.type === t && !u.banner && !u.pressed).length;
-      if (n >= 3) cands.push({ score: 75 + UNITS[t].str * 2, order: { type: 'merge', county: c.id, unit: t } });
-    }
+  for (const c of CS) if (c.owner === pid) for (const t of MERGE_TYPES) {
+    const n = mine(c.id).filter(u => u.type === t && !u.banner && !u.pressed).length;
+    if (n >= 3) cands.push({ score: 75 + UNITS[t].str * 2, order: { type: 'merge', county: c.id, unit: t } });
   }
 
   // 5. recruits
   const bal = yearlyBalance(S, pid);
   const netGold = incomeFor(S, pid) - wagesFor(S, pid);
   const canFeed = unit => (me.grain > 180 || bal - UNITS[unit].food * 5 >= -25) && netGold - UNITS[unit].wage >= 3;
-  const foeUnits = S.units.filter(u => u.owner === fid);
+  const foeUnits = view.filter(u => u.owner >= 0 && u.owner !== pid && !u.fake);
   const fshare = t => sumStr(foeUnits.filter(u => u.type === t)) / (sumStr(foeUnits) || 1);
-  let want;
   const capUnits = mine(cap).filter(u => !u.banner && !u.pressed);
   const cnt = t => capUnits.filter(u => u.type === t).length;
+  let want;
   const partial = ['maa', 'archers', 'knights', 'levy'].find(t => cnt(t) % 3 !== 0 && cnt(t) > 0 && (t !== 'levy' || rnd(S) < 0.3));
   if (partial && me.gold >= UNITS[partial].cost) want = partial;
   else if (fshare('knights') > 0.3) want = 'archers';
   else if (fshare('archers') > 0.35) want = 'maa';
-  else if (me.gold >= 70 && rnd(S) < 0.4) want = 'knights';
+  else if (me.gold >= 70 && rnd(S) < (me.ai.personality === 'warlord' ? 0.6 : me.ai.personality === 'builder' ? 0.1 : 0.4)) want = 'knights';
+  else if (me.ai.personality === 'builder') want = pickWeighted(S, ['archers', 'maa', 'levy'], [2.5, 1.5, 0.6]);
+  else if (me.ai.personality === 'warlord') want = pickWeighted(S, ['archers', 'maa', 'levy'], [1.5, 2.5, 0.3]);
   else want = pickWeighted(S, ['archers', 'maa', 'levy'], [2, 2, 0.6]);
-  // location: capital by default; threatened county if it needs help
   let where = cap;
-  if (UNITS[want].capitalOnly === undefined) {
+  if (!UNITS[want].capitalOnly) {
     let bt = capThreat;
-    for (const c of S.counties) if (c.owner === pid && threat(c.id) > bt * 1.5 && c.pop > 40) { bt = threat(c.id); where = c.id; }
+    for (const c of CS) if (c.owner === pid && threat(c.id) > bt * 1.5 && c.pop > 40) { bt = threat(c.id); where = c.id; }
   }
   if (canFeed(want)) {
     cands.push({ score: 62 + rnd(S) * 3, order: { type: 'recruit', unit: want, county: where } });
     cands.push({ score: 58, order: { type: 'recruit', unit: want, county: where } });
     cands.push({ score: 50, order: { type: 'recruit', unit: 'archers', county: cap } });
   }
+  // scouts, engines, builds, feints
+  const nScouts = mineAll.filter(u => u.type === 'scout').length;
+  if (nScouts < 1 && S.turn >= 1 && rnd(S) < prof.scout * lv.smart && canFeed('scout')) cands.push({ score: 47, order: { type: 'recruit', unit: 'scout', county: cap } });
+  for (const u of mineAll.filter(x => x.type === 'scout')) {
+    let best = null, bd = 9;
+    for (const t of CS) {
+      const d = MAP.dist[u.county][t.id];
+      if (d < 2 || d > 3 || vis.has(t.id)) continue;
+      const mdist = Math.min(...rivals.map(r => MAP.dist[t.id][r.capital]), 9);
+      if (mdist < bd) { bd = mdist; best = t.id; }
+    }
+    if (best != null) cands.push({ score: 52, order: { type: 'scout', from: u.county, target: best } });
+  }
+  const nEng = mineAll.filter(u => u.type === 'engine').length;
+  const castleTargets = CS.filter(c => c.castle >= 2 && c.owner !== pid && MAP.dist[cap][c.id] <= 4 && (c.owner >= 0));
+  if (lv.storm && castleTargets.length && nEng < 2 && !early && canFeed('engine') && (prof.rivalValue >= 1 || castleTargets.some(c => c.owner >= 0 && MAP.dist[cap][c.id] <= 2))) cands.push({ score: 66, order: { type: 'recruit', unit: 'engine', county: cap } });
+  if (prof.build > 0 && rnd(S) < lv.smart) {
+    const cc = S.counties[cap];
+    if (cc.castle < 3 && !cc.build && me.gold >= CASTLE[cc.castle + 1].cost + 25 && (prof.buildCap || cc.castle < 2)) cands.push({ score: 68 * prof.build + 5, order: { type: 'build', county: cap } });
+    for (const c of CS) if (c.owner === pid && c.id !== cap && c.castle < 2 && !c.build && me.gold >= CASTLE[c.castle + 1].cost + 25) {
+      const border = MAP.adj[c.id].some(n => S.counties[n].owner >= 0 && S.counties[n].owner !== pid) || threat(c.id) > 0;
+      if (border) cands.push({ score: 52 * prof.build, order: { type: 'build', county: c.id } });
+    }
+  }
+  if (prof.feint * lv.smart > rnd(S) && me.gold >= FEINT_COST + 10 && myTotal > 8 && S.turn >= 3) {
+    const opts = CS.filter(c => MAP.adj[c.id].some(n => S.counties[n].owner === pid || mine(n).length) && MAP.adj[c.id].some(n => S.counties[n].owner >= 0 && S.counties[n].owner !== pid) && c.owner !== pid);
+    if (opts.length) cands.push({ score: 44, order: { type: 'feint', to: opts[Math.floor(rnd(S) * opts.length)].id } });
+  }
 
   // 6. taxes
   let taxBest = null;
-  for (const c of S.counties) if (c.owner === pid) {
-    if (c.happiness < 32 && c.tax !== 'low') { taxBest = { score: 90, order: { type: 'tax', county: c.id, rate: 'low' } }; break; }
-  }
-  if (!taxBest) {
-    for (const c of S.counties) if (c.owner === pid && c.happiness > 70 && c.tax !== 'high' && (me.gold < 60 || c.tax === 'low')) { taxBest = { score: 55, order: { type: 'tax', county: c.id, rate: c.tax === 'low' ? 'normal' : 'high' } }; break; }
-  }
-  if (!taxBest) {
-    for (const c of S.counties) if (c.owner === pid && c.tax === 'high' && c.happiness < 45) { taxBest = { score: 70, order: { type: 'tax', county: c.id, rate: 'normal' } }; break; }
-  }
+  for (const c of CS) if (c.owner === pid && c.happiness < 32 && c.tax !== 'low') { taxBest = { score: 90, order: { type: 'tax', county: c.id, rate: 'low' } }; break; }
+  if (!taxBest) for (const c of CS) if (c.owner === pid && c.tax === 'high' && c.happiness < 45) { taxBest = { score: 70, order: { type: 'tax', county: c.id, rate: 'normal' } }; break; }
+  if (!taxBest && me.ai.personality !== 'builder') for (const c of CS) if (c.owner === pid && c.happiness > 70 && c.tax !== 'high' && (me.gold < 60 || c.tax === 'low')) { taxBest = { score: 55, order: { type: 'tax', county: c.id, rate: c.tax === 'low' ? 'normal' : 'high' } }; break; }
+  if (!taxBest && me.ai.personality === 'builder') for (const c of CS) if (c.owner === pid && c.happiness > 75 && c.tax === 'low') { taxBest = { score: 40, order: { type: 'tax', county: c.id, rate: 'normal' } }; break; }
   if (taxBest) cands.push(taxBest);
 
   cands.sort((x, y) => y.score - x.score);
   const out = []; const ctx = newCtx();
   for (const cd of cands) {
-    if (out.length >= MAX_ORDERS) break;
+    if (out.length >= lv.maxOrders) break;
+    if (lv.mistake && rnd(S) < lv.mistake && cd.score < 100) continue;
     if (!checkOrder(S, pid, cd.order, ctx)) { commitOrder(S, pid, cd.order, ctx); out.push(cd.order); }
   }
   me.idle = out.some(o => o.type === 'march' && S.counties[o.to].owner !== pid) ? 0 : idle + 1;
-  // garrison stances (free, secret)
-  for (const c of S.counties) {
-    if (S.units.some(u => u.owner === pid && u.county === c.id)) {
-      me.garrison[c.id] = (me.lastEnemyStance && rnd(S) < 0.3) ? counterOfStance(me.lastEnemyStance) : pickWeighted(S, STANCES, [1, 1.3, 1]);
-    }
+  for (const c of CS) if (S.units.some(u => u.owner === pid && u.county === c.id)) {
+    me.garrison[c.id] = (me.lastEnemyStance && rnd(S) < 0.3 * lv.smart) ? counterOfStance(me.lastEnemyStance) : pickWeighted(S, STANCES, [1, 1.3, 1]);
   }
   return out;
 }
+function hostileAt2(view, cid, pid) { return view.some(u => u.county === cid && u.owner !== pid); }
+
+/* ------------------------------------------------------------------ state fingerprint (for async play) */
+function stateSignature(S) {
+  // compact deterministic digest of the important state
+  let h = 2166136261 >>> 0;
+  const mix = n => { h ^= (n | 0) & 0xffffffff; h = Math.imul(h, 16777619) >>> 0; };
+  mix(S.turn); mix(S.rng);
+  for (const c of S.counties) { mix(c.owner + 3); mix(c.pop); mix(Math.round(c.happiness)); mix(c.castle); }
+  for (const u of S.units) { mix(u.id); mix(u.owner + 3); mix(u.county); }
+  for (const p of S.players) { mix(p.gold); mix(Math.round(p.grain)); }
+  return (h >>> 0).toString(16);
+}
 
 const BOTR = {
-  SEASONS, STANCES, STANCE_INFO, BEATS, MAX_ORDERS, UNITS, UNIT_TYPES, TAX, TERRAIN, MAP, MAP_DEF, PLAYER_DEF, TURN_LIMIT,
-  STANCE_BONUS, DECISIVE, BANNER_MULT,
-  newGame, resolveTurn, runTurn, aiOrders, defaultChoice,
+  SEASONS, STANCES, STANCE_INFO, BEATS, MAX_ORDERS, UNITS, UNIT_TYPES, MERGE_TYPES, TAX, TERRAIN, CASTLE, TRAITS, PERSONALITIES, DIFFICULTY, PLAYER_DEF, TURN_LIMIT, MAPS, FEINT_COST,
+  MAP, MAP_DEF, STANCE_BONUS, DECISIVE, BANNER_MULT, HERO_NAMES, SLOTS_BY_N,
+  bind, getMap: S => { bind(S); return MAP; },
+  newGame, resolveTurn, runTurn, aiOrders, defaultChoice: autoChoice, autoChoice,
   checkOrder, checkNewOrder, validateOrders, sanitizeOrders, ctxFromOrders, describeOrder, pickMerge,
-  ustr, ucost, ufood, uwage, wagesFor, ulabel, sumStr, describeUnits, unitById, unitsAt, armyStrength, countiesOf,
-  incomeFor, harvestFor, foodNeedFor, countyIncome, occupied, terrainDef, sideStrength, hostileAt
+  ustr, ucost, ufood, uwage, wagesFor, ulabel, sumStr, describeUnits, unitById, unitsAt, armyStrength, countiesOf, alivePlayers,
+  incomeFor, harvestFor, foodNeedFor, countyIncome, occupied, terrainDef, sideStrength, hostileAt, stormPenalty, stormCandidates,
+  visSet, viewUnits, fakeUnits, heroOfUnit, besieged, stateSignature, winterMult
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = BOTR;
 root.BOTR = BOTR;
