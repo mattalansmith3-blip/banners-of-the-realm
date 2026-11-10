@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Banners of the Realm</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="crest">⚜</span><h1>Banners of the Realm</h1></div>
+  <div class="season" id="seasonBadge"></div>
+  <div class="topbtns">
+    <button class="btn small" id="btnHelp">How to Play</button>
+    <button class="btn small" id="btnNew">New Game</button>
+  </div>
+</header>
+<div class="resbar" id="resbar"></div>
+
+<main class="layout">
+  <section class="mapwrap">
+    <div class="maphead" id="maphead"></div>
+    <svg id="map" viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Map of the realm"></svg>
+    <div class="legend">
+      <span><i class="sw" style="background:#2f5f9e"></i> You (House Aldric)</span>
+      <span><i class="sw" style="background:#a6302b"></i> Rival (House Valmoor)</span>
+      <span><i class="sw" style="background:#cdbf86"></i> Unclaimed</span>
+      <span>🏰 Capital &amp; Royal Banner</span>
+      <span>Shield = army power · tap a county to act</span>
+    </div>
+  </section>
+  <aside class="side">
+    <section class="panel" id="countyPanel"></section>
+    <section class="panel" id="ordersPanel"></section>
+    <section class="panel" id="logPanel">
+      <div class="panelhead"><h2>Chronicle</h2><button class="btn tiny" id="btnSkip" hidden>Skip ⏩</button></div>
+      <div id="log" class="log" aria-live="polite"></div>
+    </section>
+  </aside>
+</main>
+
+<div class="sealbar" id="sealbar"></div>
+
+<div class="modal" id="modal" hidden><div class="modalbox" id="modalbox"></div></div>
+
+<script src="engine.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
